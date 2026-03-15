@@ -1,0 +1,67 @@
+# ============================================================
+# .claudeignore — Kakeibo Flutter Project
+# コード解析に不要なファイル・ディレクトリをClaudeの読み込み対象から除外する
+# ============================================================
+
+# ----- ビルド生成物 -----
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# ----- 外部パッケージキャッシュ -----
+.pub-cache/
+.pub/
+ios/Pods/
+ios/Podfile.lock
+
+# ----- iOS 生成物・Xcode 設定 -----
+ios/Flutter/ephemeral/
+ios/Runner.xcworkspace/
+ios/Runner.xcodeproj/project.xcworkspace/
+ios/Runner.xcodeproj/xcuserdata/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+
+# ----- macOS 生成物・Xcode 設定 -----
+macos/Flutter/ephemeral/
+macos/Pods/
+macos/Podfile.lock
+macos/Runner.xcworkspace/
+macos/Runner.xcodeproj/project.xcworkspace/
+macos/Runner.xcodeproj/xcuserdata/
+
+# ----- Android 生成物 -----
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/local.properties
+*.apk
+*.aab
+
+# ----- Linux / Windows 生成物 -----
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+
+# ----- フォント・画像バイナリ（web ビルド成果物） -----
+build/web/canvaskit/
+build/web/assets/fonts/
+build/web/assets/shaders/
+build/web/icons/
+build/web/assets/NOTICES
+
+# ----- OS 固有の不要ファイル -----
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ----- エディタ・IDE -----
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# ----- Git 内部データ -----
+.git/
