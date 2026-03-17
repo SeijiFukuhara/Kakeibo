@@ -1,0 +1,56 @@
+# ビルド生成物
+build/
+.dart_tool/
+.pub-cache/
+.pub/
+
+# Android ビルド成果物
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/build/
+android/local.properties
+
+# iOS / macOS ビルド成果物
+ios/Pods/
+ios/Flutter/App.framework/
+ios/Flutter/Flutter.framework/
+ios/Flutter/flutter_export_environment.sh
+ios/.last_build_id
+macos/Pods/
+
+# Windows / Linux ビルド成果物
+windows/flutter/generated_plugin_registrant.cc
+windows/flutter/generated_plugin_registrant.h
+windows/flutter/generated_plugins.cmake
+linux/flutter/generated_plugin_registrant.cc
+linux/flutter/generated_plugin_registrant.h
+linux/flutter/generated_plugins.cmake
+
+# Web ビルド成果物
+web/favicon.png
+
+# IDE 設定
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# OS 固有ファイル
+.DS_Store
+Thumbs.db
+
+# ロック・メタデータ（内容が大きく解析不要）
+pubspec.lock
+.flutter-plugins-dependencies
+.metadata
+
+# ログ・シンボル
+*.log
+app.*.symbols
+app.*.map.json
+
+# カバレッジ
+coverage/
