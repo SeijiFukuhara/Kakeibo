@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'input_screen.dart';
 import 'calendar_screen.dart';
 import 'analysis_screen.dart';
 import 'category_settings_screen.dart';
@@ -19,7 +20,7 @@ class _MainScreenState extends State<MainScreen> {
   late final List<Widget> _screens;
 
   void _navigateToAnalysis(DateTime month) {
-    setState(() => _currentIndex = 1);
+    setState(() => _currentIndex = 2);
     _analysisKey.currentState?.reloadAndSetMonth(month);
   }
 
@@ -27,6 +28,7 @@ class _MainScreenState extends State<MainScreen> {
   void initState() {
     super.initState();
     _screens = [
+      const InputScreen(),
       CalendarScreen(key: _calendarKey, onNavigateToAnalysis: _navigateToAnalysis),
       AnalysisScreen(key: _analysisKey),
       const CategorySettingsScreen(),
@@ -44,15 +46,20 @@ class _MainScreenState extends State<MainScreen> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           // 設定タブから離れるときカレンダーの設定を再読み込み
-          if (_currentIndex == 2) {
+          if (_currentIndex == 3) {
             _calendarKey.currentState?.reloadSettings();
           }
           setState(() => _currentIndex = index);
-          if (index == 1) {
+          if (index == 2) {
             _analysisKey.currentState?.reload();
           }
         },
         destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.edit_outlined),
+            selectedIcon: Icon(Icons.edit),
+            label: '入力',
+          ),
           NavigationDestination(
             icon: Icon(Icons.calendar_month_outlined),
             selectedIcon: Icon(Icons.calendar_month),
