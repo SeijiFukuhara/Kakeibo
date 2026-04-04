@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'; // ← 追加
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:kakeibo_app_mvp_2/firebase_options.dart';
 import 'package:kakeibo_app_mvp_2/screens/main_screen.dart';
+import 'package:kakeibo_app_mvp_2/screens/login_screen.dart';
 
 void main() async {
-  // ウィジェットの初期化を確実に行う
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 日本語の言語データを読み込んでからアプリを起動
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await initializeDateFormatting('ja_JP', null);
-
   runApp(const MyApp());
 }
 
@@ -39,7 +40,20 @@ class MyApp extends StatelessWidget {
         // AppBarのデザインを統一
         appBarTheme: const AppBarTheme(centerTitle: true, elevation: 2),
       ),
-      home: const MainScreen(),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          if (snapshot.hasData) {
+            return const MainScreen();
+          }
+          return const LoginScreen();
+        },
+      ),
     );
   }
 }
