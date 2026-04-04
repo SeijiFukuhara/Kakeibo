@@ -17,7 +17,8 @@ class CalendarScreenState extends State<CalendarScreen> {
   void reloadSettings() {
     _loadCategories();
   }
-  DateTime _focusedDay = DateTime.now();
+  DateTime _focusedDay = DateTime(
+      DateTime.now().year, DateTime.now().month, DateTime.now().day);
   DateTime? _selectedDay;
 
   List<Map<String, String>> _monthlyEvents = [];
@@ -338,6 +339,12 @@ class CalendarScreenState extends State<CalendarScreen> {
                           }),
                         ),
                         const SizedBox(height: 4),
+                        TextField(
+                          controller: amountCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: '金額', suffixText: '円'),
+                        ),
                         DropdownButton<String>(
                           value: selectedCategory,
                           isExpanded: true,
@@ -351,46 +358,29 @@ class CalendarScreenState extends State<CalendarScreen> {
                               setDialogState(() => selectedCategory = v),
                         ),
                         TextField(
-                          controller: amountCtrl,
-                          keyboardType: TextInputType.number,
+                          controller: commentCtrl,
                           decoration: const InputDecoration(
-                              labelText: '金額', suffixText: '円'),
+                              labelText: 'メモ（任意）'),
                         ),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: DropdownButtonFormField<int?>(
-                                initialValue: inputDay,
-                                decoration: const InputDecoration(
-                                    labelText: '日付（任意）'),
-                                items: [
-                                  const DropdownMenuItem(
-                                      value: null, child: Text('指定なし')),
-                                  ...List.generate(
-                                    DateUtils.getDaysInMonth(
-                                        _focusedDay.year,
-                                        _focusedDay.month),
-                                    (i) => DropdownMenuItem(
-                                        value: i + 1,
-                                        child: Text('${i + 1}日')),
-                                  ),
-                                ],
-                                onChanged: (v) =>
-                                    setDialogState(() => inputDay = v),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              flex: 3,
-                              child: TextField(
-                                controller: commentCtrl,
-                                decoration: const InputDecoration(
-                                    labelText: 'コメント（任意）'),
-                              ),
+                        const SizedBox(height: 4),
+                        DropdownButtonFormField<int?>(
+                          initialValue: inputDay,
+                          decoration: const InputDecoration(
+                              labelText: '日付（任意）'),
+                          items: [
+                            const DropdownMenuItem(
+                                value: null, child: Text('指定なし')),
+                            ...List.generate(
+                              DateUtils.getDaysInMonth(
+                                  _focusedDay.year,
+                                  _focusedDay.month),
+                              (i) => DropdownMenuItem(
+                                  value: i + 1,
+                                  child: Text('${i + 1}日')),
                             ),
                           ],
+                          onChanged: (v) =>
+                              setDialogState(() => inputDay = v),
                         ),
                       ],
                     ),
@@ -784,38 +774,6 @@ class CalendarScreenState extends State<CalendarScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 日付セレクター
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<DateTime>(
-                        value: selectedDate,
-                        isExpanded: true,
-                        items: List.generate(
-                          DateUtils.getDaysInMonth(
-                              selectedDate.year, selectedDate.month),
-                          (i) {
-                            final d = DateTime(selectedDate.year,
-                                selectedDate.month, i + 1);
-                            const wds = [
-                              '月', '火', '水', '木', '金', '土', '日'
-                            ];
-                            return DropdownMenuItem(
-                              value: d,
-                              child: Text(
-                                  '${d.month}月${d.day}日（${wds[d.weekday - 1]}）'),
-                            );
-                          },
-                        ),
-                        onChanged: (d) {
-                          if (d != null) {
-                            setSheetState(() => selectedDate = d);
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-
                   // 履歴リスト
                   if (dayEvents.isNotEmpty) ...[
                     const Padding(
@@ -924,6 +882,12 @@ class CalendarScreenState extends State<CalendarScreen> {
                           }),
                         ),
                         const SizedBox(height: 4),
+                        TextField(
+                          controller: amountCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: '金額', suffixText: '円'),
+                        ),
                         DropdownButton<String>(
                           value: selectedCategory,
                           isExpanded: true,
@@ -937,15 +901,35 @@ class CalendarScreenState extends State<CalendarScreen> {
                               setSheetState(() => selectedCategory = v),
                         ),
                         TextField(
-                          controller: amountCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                              labelText: '金額', suffixText: '円'),
-                        ),
-                        TextField(
                           controller: commentCtrl,
                           decoration: const InputDecoration(
-                              labelText: 'コメント（任意）'),
+                              labelText: 'メモ（任意）'),
+                        ),
+                        const SizedBox(height: 4),
+                        DropdownButtonHideUnderline(
+                          child: DropdownButton<DateTime>(
+                            value: selectedDate,
+                            isExpanded: true,
+                            items: List.generate(
+                              DateUtils.getDaysInMonth(
+                                  selectedDate.year, selectedDate.month),
+                              (i) {
+                                final d = DateTime(selectedDate.year,
+                                    selectedDate.month, i + 1);
+                                const wds = ['月', '火', '水', '木', '金', '土', '日'];
+                                return DropdownMenuItem(
+                                  value: d,
+                                  child: Text(
+                                      '${d.month}月${d.day}日（${wds[d.weekday - 1]}）'),
+                                );
+                              },
+                            ),
+                            onChanged: (d) {
+                              if (d != null) {
+                                setSheetState(() => selectedDate = d);
+                              }
+                            },
+                          ),
                         ),
                       ],
                     ),
