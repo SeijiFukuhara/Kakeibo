@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:convert';
 import 'dart:math';
 
@@ -21,10 +22,37 @@ class AnalysisScreen extends StatefulWidget {
   const AnalysisScreen({super.key});
 
   @override
-  State<AnalysisScreen> createState() => _AnalysisScreenState();
+  State<AnalysisScreen> createState() => AnalysisScreenState();
 }
 
-class _AnalysisScreenState extends State<AnalysisScreen> {
+class AnalysisScreenState extends State<AnalysisScreen>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  // 月の開始日
+  int _monthStartDay = 1;
+
+  void reload() {
+    _loadMonthlyData();
+    _loadYearlyData();
+  }
+
+  void reloadAndSetMonth(DateTime month) {
+    _tabController.animateTo(0);
+    setState(() => _month = month);
+    _loadMonthlyData();
+  }
+
+  // 日付から「論理月」を計算するヘルパー
+  // 例: startDay=16, 2/20 → 3月, 3/10 → 3月
+  (int year, int month) _logicalYearMonth(DateTime date) {
+    if (_monthStartDay <= 1 || date.day < _monthStartDay) {
+      return (date.year, date.month);
+    }
+    final next = DateTime(date.year, date.month + 1);
+    return (next.year, next.month);
+  }
+
   // 月ごと
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   Map<String, int> _expenseByCategory = {};
@@ -43,15 +71,27 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   int _yearlyTotalIncome = 0;
   int _yearlyTotalExpense = 0;
 
+  // カテゴリカードへのスクロール用キー
+  final _expenseCatKeys = <String, GlobalKey>{};
+  final _incomeCatKeys = <String, GlobalKey>{};
+
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadMonthlyData();
     _loadYearlyData();
   }
 
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadMonthlyData() async {
     final prefs = await SharedPreferences.getInstance();
+    _monthStartDay = prefs.getInt('month_start_day') ?? 1;
     final expMap = <String, int>{};
     final incMap = <String, int>{};
     int totalInc = 0;
@@ -62,7 +102,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       if (parts.length != 3) continue;
       final year = int.tryParse(parts[0]);
       final month = int.tryParse(parts[1]);
-      if (year != _month.year || month != _month.month) continue;
+      final day = int.tryParse(parts[2]);
+      if (year == null || month == null || day == null) continue;
+
+      final (lYear, lMonth) = _logicalYearMonth(DateTime(year, month, day));
+      if (lYear != _month.year || lMonth != _month.month) continue;
 
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) continue;
@@ -118,6 +162,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
   Future<void> _loadYearlyData() async {
     final prefs = await SharedPreferences.getInstance();
+    _monthStartDay = prefs.getInt('month_start_day') ?? 1;
     final monthlyData =
         List.generate(12, (_) => {'income': 0, 'expense': 0});
     final expMap = <String, int>{};
@@ -132,7 +177,11 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       if (parts.length != 3) continue;
       final year = int.tryParse(parts[0]);
       final month = int.tryParse(parts[1]);
-      if (year != _year || month == null || month < 1 || month > 12) continue;
+      final day = int.tryParse(parts[2]);
+      if (year == null || month == null || day == null) continue;
+
+      final (lYear, lMonth) = _logicalYearMonth(DateTime(year, month, day));
+      if (lYear != _year || lMonth < 1 || lMonth > 12) continue;
 
       final jsonStr = prefs.getString(key);
       if (jsonStr == null) continue;
@@ -144,18 +193,18 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
         final category = e['title'] ?? '不明';
         if (e['type'] == 'income') {
-          monthlyData[month - 1]['income'] =
-              (monthlyData[month - 1]['income'] ?? 0) + amount;
+          monthlyData[lMonth - 1]['income'] =
+              (monthlyData[lMonth - 1]['income'] ?? 0) + amount;
           incMap[category] = (incMap[category] ?? 0) + amount;
           incCatMonthly.putIfAbsent(category, () => List.filled(12, 0));
-          incCatMonthly[category]![month - 1] += amount;
+          incCatMonthly[category]![lMonth - 1] += amount;
           totalInc += amount;
         } else {
-          monthlyData[month - 1]['expense'] =
-              (monthlyData[month - 1]['expense'] ?? 0) + amount;
+          monthlyData[lMonth - 1]['expense'] =
+              (monthlyData[lMonth - 1]['expense'] ?? 0) + amount;
           expMap[category] = (expMap[category] ?? 0) + amount;
           expCatMonthly.putIfAbsent(category, () => List.filled(12, 0));
-          expCatMonthly[category]![month - 1] += amount;
+          expCatMonthly[category]![lMonth - 1] += amount;
           totalExp += amount;
         }
       }
@@ -204,29 +253,37 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       _yearlyIncomeCategoryMonthly = incCatMonthly;
       _yearlyTotalIncome = totalInc;
       _yearlyTotalExpense = totalExp;
+      // カテゴリキーを更新（既存キーを再利用してスクロール位置を保持）
+      _expenseCatKeys.removeWhere((k, _) => !expCatMonthly.containsKey(k));
+      for (final k in expCatMonthly.keys) {
+        _expenseCatKeys.putIfAbsent(k, GlobalKey.new);
+      }
+      _incomeCatKeys.removeWhere((k, _) => !incCatMonthly.containsKey(k));
+      for (final k in incCatMonthly.keys) {
+        _incomeCatKeys.putIfAbsent(k, GlobalKey.new);
+      }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('分析'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: '月ごと'),
-              Tab(text: '年ごと'),
-            ],
-          ),
-        ),
-        body: TabBarView(
-          children: [
-            _buildMonthlyView(),
-            _buildYearlyView(),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('分析'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: '月ごと'),
+            Tab(text: '年ごと'),
           ],
         ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildMonthlyView(),
+          _buildYearlyView(),
+        ],
       ),
     );
   }
@@ -246,7 +303,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         _buildSummaryCard(items: [
           ('収入', _totalIncome, Colors.green),
           ('支出', _totalExpense, Colors.red),
-          ('収支', balance, balance >= 0 ? Colors.blue : Colors.orange),
+          ('合計', balance, balance >= 0 ? Colors.blue : Colors.orange),
         ]),
         const SizedBox(height: 16),
         if (_expenseByCategory.isNotEmpty) ...[
@@ -341,10 +398,19 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                                 style: const TextStyle(fontSize: 12),
                                 overflow: TextOverflow.ellipsis),
                           ),
-                          Text(
-                            '${(ratios[i] * 100).toStringAsFixed(0)}%',
-                            style: const TextStyle(
-                                fontSize: 11, color: Colors.grey),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '¥${_formatAmount(entries[i].value)}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                              Text(
+                                '${(ratios[i] * 100).toStringAsFixed(0)}%',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -429,12 +495,12 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
         const SizedBox(height: 16),
         if (_yearlyExpenseCategoryMonthly.isNotEmpty) ...[
           _buildCategoryLineSection(
-              '支出カテゴリ別（月別）', _yearlyExpenseCategoryMonthly),
+              '支出カテゴリ別（月別）', _yearlyExpenseCategoryMonthly, _expenseCatKeys),
           const SizedBox(height: 16),
         ],
         if (_yearlyIncomeCategoryMonthly.isNotEmpty)
           _buildCategoryLineSection(
-              '収入カテゴリ別（月別）', _yearlyIncomeCategoryMonthly),
+              '収入カテゴリ別（月別）', _yearlyIncomeCategoryMonthly, _incomeCatKeys),
         if (_yearlyExpenseByCategory.isEmpty &&
             _yearlyIncomeByCategory.isEmpty)
           const Center(
@@ -449,7 +515,9 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   Widget _buildCategoryLineSection(
-      String title, Map<String, List<int>> categoryData) {
+      String title,
+      Map<String, List<int>> categoryData,
+      Map<String, GlobalKey> keys) {
     final categories = categoryData.keys.toList()
       ..sort((a, b) => categoryData[b]!.reduce((x, y) => x + y)
           .compareTo(categoryData[a]!.reduce((x, y) => x + y)));
@@ -457,45 +525,98 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
     final colors = List.generate(
         categories.length, (i) => _palette[i % _palette.length]);
 
-    final List<_SeriesData> seriesList = [
-      for (int i = 0; i < categories.length; i++)
-        _SeriesData(
-            data: List<int>.from(categoryData[categories[i]] ?? []),
-            color: colors[i]),
-    ];
-
-    return _sectionCard(
-      title: title,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 4,
-          children: [
-            for (int i = 0; i < categories.length; i++)
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                      color: colors[i], shape: BoxShape.circle),
-                ),
-                const SizedBox(width: 4),
-                Text(categories[i],
-                    style: const TextStyle(fontSize: 11)),
-              ]),
-          ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+          child: Text(title,
+              style: const TextStyle(
+                  fontSize: 15, fontWeight: FontWeight.bold)),
         ),
-        const SizedBox(height: 8),
+        // カテゴリ選択チップバー（タップでスクロール）
         SizedBox(
-          height: 180,
-          child: CustomPaint(
-            painter: _LineChartPainter(
-              seriesList: seriesList,
-              formatAmount: _formatAmount,
-            ),
-            size: Size.infinite,
+          height: 36,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: categories.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 6),
+            itemBuilder: (ctx, i) {
+              final cat = categories[i];
+              final color = colors[i];
+              return ActionChip(
+                visualDensity: VisualDensity.compact,
+                backgroundColor: color.withValues(alpha: 0.12),
+                side: BorderSide(color: color),
+                label: Text(cat,
+                    style: TextStyle(fontSize: 12, color: color)),
+                onPressed: () {
+                  final keyCtx = keys[cat]?.currentContext;
+                  if (keyCtx != null) {
+                    Scrollable.ensureVisible(
+                      keyCtx,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeInOut,
+                    );
+                  }
+                },
+              );
+            },
           ),
         ),
+        const SizedBox(height: 10),
+        for (int i = 0; i < categories.length; i++) ...[
+          Card(
+            key: keys[categories[i]],
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                            color: colors[i], shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(categories[i],
+                          style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      Text(
+                        '年間 ¥${_formatAmount(categoryData[categories[i]]!.reduce((a, b) => a + b))}',
+                        style:
+                            TextStyle(fontSize: 12, color: colors[i]),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 140,
+                    child: CustomPaint(
+                      painter: _LineChartPainter(
+                        seriesList: [
+                          _SeriesData(
+                            data: List<int>.from(
+                                categoryData[categories[i]] ?? []),
+                            color: colors[i],
+                          ),
+                        ],
+                        formatAmount: _formatAmount,
+                      ),
+                      size: Size.infinite,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (i < categories.length - 1) const SizedBox(height: 8),
+        ],
       ],
     );
   }
@@ -575,13 +696,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   }
 
   String _formatAmount(int amount) {
-    if (amount >= 10000) {
-      final man = amount / 10000;
-      return man == man.truncateToDouble()
-          ? '${man.toInt()}万'
-          : '${man.toStringAsFixed(1)}万';
-    }
-    return amount.toString();
+    return NumberFormat('#,###').format(amount);
   }
 }
 

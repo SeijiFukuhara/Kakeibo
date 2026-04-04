@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart'; // ← 追加
 import 'package:intl/date_symbol_data_local.dart';
-import 'package:kakeibo_app_mvp_2/screens/calendar_screen.dart';
+import 'package:kakeibo_app_mvp_2/screens/main_screen.dart';
 
 void main() async {
   // ウィジェットの初期化を確実に行う
@@ -39,7 +39,7 @@ class MyApp extends StatelessWidget {
         // AppBarのデザインを統一
         appBarTheme: const AppBarTheme(centerTitle: true, elevation: 2),
       ),
-      home: const CalendarScreen(),
+      home: const MainScreen(),
     );
   }
 }
