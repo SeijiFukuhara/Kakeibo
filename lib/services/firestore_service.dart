@@ -92,6 +92,20 @@ class FirestoreService {
     return result;
   }
 
+  // ── 定期支払い（サブスクリプション）──────────────────────────────────
+
+  static Future<List<Map<String, String>>> getSubscriptions() async {
+    final doc = await _settings.get();
+    if (!doc.exists) return [];
+    final list = (doc.data()?['subscriptions'] as List<dynamic>?) ?? [];
+    return list.map((e) => Map<String, String>.from(e as Map)).toList();
+  }
+
+  static Future<void> setSubscriptions(
+      List<Map<String, String>> subscriptions) async {
+    await _settings.set({'subscriptions': subscriptions}, SetOptions(merge: true));
+  }
+
   // ── 設定・カテゴリ ─────────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> getSettings() async {

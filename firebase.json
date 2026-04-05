@@ -1,1 +1,39 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"kakeibo-app-64231","appId":"1:1082762279866:android:fdc1553eb8b01e4bcafb83","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"kakeibo-app-64231","configurations":{"android":"1:1082762279866:android:fdc1553eb8b01e4bcafb83","ios":"1:1082762279866:ios:86ff9882d6ef407ecafb83","macos":"1:1082762279866:ios:86ff9882d6ef407ecafb83","web":"1:1082762279866:web:dd8b2d724c62436acafb83","windows":"1:1082762279866:web:6a47b3a461a2d6d3cafb83"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "kakeibo-app-64231",
+          "appId": "1:1082762279866:android:fdc1553eb8b01e4bcafb83",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "kakeibo-app-64231",
+          "configurations": {
+            "android": "1:1082762279866:android:fdc1553eb8b01e4bcafb83",
+            "ios": "1:1082762279866:ios:86ff9882d6ef407ecafb83",
+            "macos": "1:1082762279866:ios:86ff9882d6ef407ecafb83",
+            "web": "1:1082762279866:web:dd8b2d724c62436acafb83",
+            "windows": "1:1082762279866:web:6a47b3a461a2d6d3cafb83"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

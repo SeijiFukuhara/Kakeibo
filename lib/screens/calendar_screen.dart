@@ -127,21 +127,25 @@ class CalendarScreenState extends State<CalendarScreen> {
 
   // ── 日エントリの編集 ──────────────────────────────────────────────
   Future<void> _editDailyEvent(
-      Map<String, String> event, String? category, int amount, String comment) async {
+      Map<String, String> event, String? category, String type, int amount, String comment, DateTime newDate) async {
     final storageKey = event['storageKey']!;
     final eventIndex = int.parse(event['eventIndex']!);
     final parts = storageKey.split('-');
-    final date = DateTime(
+    final origDate = DateTime(
         int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
-    final entries = await FirestoreService.getDailyEntries(date);
-    if (eventIndex >= entries.length) return;
-    entries[eventIndex] = {
-      'title': category ?? entries[eventIndex]['title']!,
+    // 元の日付から削除
+    final origEntries = await FirestoreService.getDailyEntries(origDate);
+    if (eventIndex < origEntries.length) origEntries.removeAt(eventIndex);
+    await FirestoreService.setDailyEntries(origDate, origEntries);
+    // 新しい日付に追加
+    final newEntries = await FirestoreService.getDailyEntries(newDate);
+    newEntries.add({
+      'title': category ?? '',
       'amount': '$amount',
-      'type': event['type']!,
+      'type': type,
       'comment': comment,
-    };
-    await FirestoreService.setDailyEntries(date, entries);
+    });
+    await FirestoreService.setDailyEntries(newDate, newEntries);
     await _loadMonthData(_focusedDay);
   }
 
@@ -206,39 +210,20 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  // ── 月入力ダイアログ（ヘッダータップ用）────────────────────────────
-  void _showMonthInputDialog() {
-    _loadCategories();
-    final amountCtrl = TextEditingController();
-    final commentCtrl = TextEditingController();
-    int? inputDay;
-    String inputType = 'expense';
-    String? selectedCategory =
-        _monthlyExpenseCats.isNotEmpty ? _monthlyExpenseCats[0] : null;
-
+  // ── 月ごとリストダイアログ（〇月の収支を登録ボタン用）────────────
+  void _showMonthListDialog() {
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) {
+        builder: (ctx, setDs) {
           final allEntries = [
-            ...List.generate(
-              _monthIncomeEntries.length,
-              (i) => {
-                ..._monthIncomeEntries[i],
-                'type': 'income',
-                'entryIndex': '$i',
-              },
-            ),
-            ...List.generate(
-              _monthExpenseEntries.length,
-              (i) => {
-                ..._monthExpenseEntries[i],
-                'type': 'expense',
-                'entryIndex': '$i',
-              },
-            ),
+            ...List.generate(_monthIncomeEntries.length, (i) => {
+              ..._monthIncomeEntries[i], 'type': 'income', 'entryIndex': '$i',
+            }),
+            ...List.generate(_monthExpenseEntries.length, (i) => {
+              ..._monthExpenseEntries[i], 'type': 'expense', 'entryIndex': '$i',
+            }),
           ];
-
           return Dialog(
             child: Container(
               width: 420,
@@ -247,37 +232,42 @@ class CalendarScreenState extends State<CalendarScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // タイトル
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-                    child: Text(
-                      '${_focusedDay.month}月の入力',
-                      style: const TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
+                    child: Text('${_focusedDay.month}月の入力',
+                        style: const TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
                   ),
-
-                  // 履歴リスト
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.add_circle_outline),
+                    title: const Text('新規作成'),
+                    onTap: () async {
+                      await _showMonthlyEntryFormDialog();
+                      setDs(() {});
+                    },
+                  ),
                   if (allEntries.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('履歴',
-                          style:
-                              TextStyle(fontSize: 12, color: Colors.grey)),
-                    ),
-                    const Divider(height: 8),
+                    const Divider(height: 1),
                     Flexible(
                       child: ListView.builder(
                         shrinkWrap: true,
                         itemCount: allEntries.length,
-                        itemBuilder: (ctx, i) {
+                        itemBuilder: (_, i) {
                           final e = allEntries[i];
                           final isIncome = e['type'] == 'income';
-                          final color =
-                              isIncome ? Colors.green : Colors.red;
+                          final color = isIncome ? Colors.green : Colors.red;
                           final idx = int.parse(e['entryIndex']!);
                           return ListTile(
                             dense: true,
+                            onTap: () async {
+                              await _showMonthlyEntryFormDialog(
+                                initialType: e['type'],
+                                editIndex: idx,
+                                editEntry: Map<String, String>.from(e),
+                              );
+                              setDs(() {});
+                            },
                             leading: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
@@ -285,11 +275,8 @@ class CalendarScreenState extends State<CalendarScreen> {
                                 color: color.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(4),
                               ),
-                              child: Text(
-                                isIncome ? '収入' : '支出',
-                                style: TextStyle(
-                                    color: color, fontSize: 11),
-                              ),
+                              child: Text(isIncome ? '収入' : '支出',
+                                  style: TextStyle(color: color, fontSize: 11)),
                             ),
                             title: Text(e['title'] ?? '',
                                 style: const TextStyle(fontSize: 13)),
@@ -302,8 +289,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                               ];
                               return parts.isNotEmpty
                                   ? Text(parts.join('　'),
-                                      style:
-                                          const TextStyle(fontSize: 11))
+                                      style: const TextStyle(fontSize: 11))
                                   : null;
                             }(),
                             trailing: Row(
@@ -316,29 +302,13 @@ class CalendarScreenState extends State<CalendarScreen> {
                                       fontWeight: FontWeight.bold),
                                 ),
                                 IconButton(
-                                  icon: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 18),
+                                  icon: const Icon(Icons.delete_outline, size: 18),
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(
                                       minWidth: 32, minHeight: 32),
                                   onPressed: () async {
-                                    await _showEditMonthEntryDialog(
-                                        e['type']!, idx, e);
-                                    setDialogState(() {});
-                                  },
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                      Icons.delete_outline,
-                                      size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                      minWidth: 32, minHeight: 32),
-                                  onPressed: () async {
-                                    await _deleteMonthEntry(
-                                        e['type']!, idx);
-                                    setDialogState(() {});
+                                    await _deleteMonthEntry(e['type']!, idx);
+                                    setDs(() {});
                                   },
                                 ),
                               ],
@@ -348,117 +318,11 @@ class CalendarScreenState extends State<CalendarScreen> {
                       ),
                     ),
                   ],
-
-                  const Divider(height: 8),
-
-                  // 入力フォーム
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SegmentedButton<String>(
-                          segments: const [
-                            ButtonSegment(
-                                value: 'income', label: Text('収入')),
-                            ButtonSegment(
-                                value: 'expense', label: Text('支出')),
-                          ],
-                          selected: {inputType},
-                          onSelectionChanged: (s) =>
-                              setDialogState(() {
-                            inputType = s.first;
-                            final list = inputType == 'income'
-                                ? _monthlyIncomeCats
-                                : _monthlyExpenseCats;
-                            selectedCategory =
-                                list.isNotEmpty ? list[0] : null;
-                          }),
-                        ),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: amountCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                              labelText: '金額', suffixText: '円'),
-                        ),
-                        DropdownButton<String>(
-                          value: selectedCategory,
-                          isExpanded: true,
-                          items: (inputType == 'income'
-                                  ? _monthlyIncomeCats
-                                  : _monthlyExpenseCats)
-                              .map((c) =>
-                                  DropdownMenuItem(value: c, child: Text(c)))
-                              .toList(),
-                          onChanged: (v) =>
-                              setDialogState(() => selectedCategory = v),
-                        ),
-                        TextField(
-                          controller: commentCtrl,
-                          decoration: const InputDecoration(
-                              labelText: 'メモ（任意）'),
-                        ),
-                        const SizedBox(height: 4),
-                        DropdownButtonFormField<int?>(
-                          initialValue: inputDay,
-                          decoration: const InputDecoration(
-                              labelText: '日付（任意）'),
-                          items: [
-                            const DropdownMenuItem(
-                                value: null, child: Text('指定なし')),
-                            ...List.generate(
-                              DateUtils.getDaysInMonth(
-                                  _focusedDay.year,
-                                  _focusedDay.month),
-                              (i) => DropdownMenuItem(
-                                  value: i + 1,
-                                  child: Text('${i + 1}日')),
-                            ),
-                          ],
-                          onChanged: (v) =>
-                              setDialogState(() => inputDay = v),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // ボタン
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('閉じる'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () async {
-                            if (amountCtrl.text.isEmpty) return;
-                            if (inputType == 'income') {
-                              await _addMonthIncome(
-                                selectedCategory,
-                                int.tryParse(amountCtrl.text) ?? 0,
-                                inputDay?.toString() ?? '',
-                                commentCtrl.text,
-                              );
-                            } else {
-                              await _addMonthExpense(
-                                selectedCategory,
-                                int.tryParse(amountCtrl.text) ?? 0,
-                                inputDay?.toString() ?? '',
-                                commentCtrl.text,
-                              );
-                            }
-                            amountCtrl.clear();
-                            commentCtrl.clear();
-                            setDialogState(() => inputDay = null);
-                          },
-                          child: const Text('追加'),
-                        ),
-                      ],
-                    ),
+                  const Divider(height: 1),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('閉じる',
+                        style: TextStyle(color: Colors.grey)),
                   ),
                 ],
               ),
@@ -469,170 +333,166 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  // ── 月固定エントリ編集ダイアログ ─────────────────────────────────
-  Future<void> _showEditMonthEntryDialog(
-      String type, int index, Map<String, String> entry) async {
-    final categories =
-        type == 'income' ? _monthlyIncomeCats : _monthlyExpenseCats;
-    final amountCtrl = TextEditingController(text: entry['amount']);
-    final commentCtrl =
-        TextEditingController(text: entry['comment'] ?? '');
-    int? editDay = int.tryParse(entry['day'] ?? '');
-    String? selectedCategory = categories.contains(entry['title'])
-        ? entry['title']
-        : (categories.isNotEmpty ? categories[0] : null);
+  // ── 月ごとエントリ入力フォーム（新規・編集共通）──────────────────
+  Future<void> _showMonthlyEntryFormDialog({
+    String? initialType,
+    int? editIndex,
+    Map<String, String>? editEntry,
+  }) async {
+    final isEdit = editEntry != null;
+    String inputType = isEdit
+        ? (editEntry['type'] ?? initialType ?? 'expense')
+        : (initialType ?? 'expense');
     final daysInMonth =
         DateUtils.getDaysInMonth(_focusedDay.year, _focusedDay.month);
 
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setEditState) => AlertDialog(
-          title: const Text('編集'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButton<String>(
-                value: selectedCategory,
-                isExpanded: true,
-                items: categories
-                    .map((c) =>
-                        DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) =>
-                    setEditState(() => selectedCategory = v),
-              ),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: '金額', suffixText: '円'),
-              ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: DropdownButtonFormField<int?>(
-                      initialValue: editDay,
-                      decoration: const InputDecoration(
-                          labelText: '日付（任意）'),
-                      items: [
-                        const DropdownMenuItem(
-                            value: null, child: Text('指定なし')),
-                        ...List.generate(
-                          daysInMonth,
-                          (i) => DropdownMenuItem(
-                              value: i + 1,
-                              child: Text('${i + 1}日')),
-                        ),
-                      ],
-                      onChanged: (v) =>
-                          setEditState(() => editDay = v),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 3,
-                    child: TextField(
-                      controller: commentCtrl,
-                      decoration: const InputDecoration(
-                          labelText: 'コメント（任意）'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('キャンセル')),
-            ElevatedButton(
-              onPressed: () async {
-                if (amountCtrl.text.isEmpty) return;
-                await _editMonthEntry(
-                  type,
-                  index,
-                  selectedCategory,
-                  int.tryParse(amountCtrl.text) ?? 0,
-                  editDay?.toString() ?? '',
-                  commentCtrl.text,
-                );
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('保存'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+    List<String> cats() =>
+        inputType == 'income' ? _monthlyIncomeCats : _monthlyExpenseCats;
 
-  // ── 日エントリ編集ダイアログ ─────────────────────────────────────
-  Future<void> _showEditDailyEventDialog(Map<String, String> event) async {
-    final isIncome = event['type'] == 'income';
-    final categories =
-        isIncome ? _incomeCategories : _expenseCategories;
-    final amountCtrl = TextEditingController(text: event['amount']);
+    String? selectedCategory = isEdit
+        ? (cats().contains(editEntry['title'])
+            ? editEntry['title']
+            : (cats().isNotEmpty ? cats()[0] : null))
+        : (cats().isNotEmpty ? cats()[0] : null);
+    final amountCtrl =
+        TextEditingController(text: isEdit ? (editEntry['amount'] ?? '') : '');
     final commentCtrl =
-        TextEditingController(text: event['comment'] ?? '');
-    String? selectedCategory = categories.contains(event['title'])
-        ? event['title']
-        : (categories.isNotEmpty ? categories[0] : null);
+        TextEditingController(text: isEdit ? (editEntry['comment'] ?? '') : '');
+    int? inputDay =
+        isEdit ? int.tryParse(editEntry['day'] ?? '') : null;
 
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setEditState) => AlertDialog(
-          title: const Text('編集'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButton<String>(
-                value: selectedCategory,
-                isExpanded: true,
-                items: categories
-                    .map((c) =>
-                        DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) =>
-                    setEditState(() => selectedCategory = v),
-              ),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: '金額', suffixText: '円'),
-              ),
-              TextField(
-                controller: commentCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'コメント（任意）'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('キャンセル')),
-            ElevatedButton(
-              onPressed: () async {
-                if (amountCtrl.text.isEmpty) return;
-                await _editDailyEvent(
-                  event,
-                  selectedCategory,
-                  int.tryParse(amountCtrl.text) ?? 0,
-                  commentCtrl.text,
-                );
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('保存'),
+        builder: (ctx, setDs) => Dialog(
+          child: Container(
+            width: 420,
+            constraints: const BoxConstraints(maxHeight: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'income', label: Text('収入')),
+                          ButtonSegment(value: 'expense', label: Text('支出')),
+                        ],
+                        selected: {inputType},
+                        onSelectionChanged: (s) => setDs(() {
+                          inputType = s.first;
+                          selectedCategory =
+                              cats().isNotEmpty ? cats()[0] : null;
+                        }),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: amountCtrl,
+                        keyboardType: TextInputType.number,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                            labelText: '金額',
+                            suffixText: '円',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCategory,
+                        decoration: const InputDecoration(
+                            labelText: 'カテゴリ',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                        items: cats()
+                            .map((c) =>
+                                DropdownMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                        onChanged: (v) => setDs(() => selectedCategory = v),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: commentCtrl,
+                        decoration: const InputDecoration(
+                            labelText: 'メモ（任意）',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<int?>(
+                        initialValue: inputDay,
+                        decoration: const InputDecoration(
+                            labelText: '日付（任意）',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                        items: [
+                          const DropdownMenuItem(
+                              value: null, child: Text('指定なし')),
+                          ...List.generate(
+                            daysInMonth,
+                            (i) => DropdownMenuItem(
+                                value: i + 1, child: Text('${i + 1}日')),
+                          ),
+                        ],
+                        onChanged: (v) => setDs(() => inputDay = v),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('キャンセル'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          if (amountCtrl.text.isEmpty) return;
+                          if (isEdit && editIndex != null) {
+                            await _editMonthEntry(
+                              inputType,
+                              editIndex,
+                              selectedCategory,
+                              int.tryParse(amountCtrl.text) ?? 0,
+                              inputDay?.toString() ?? '',
+                              commentCtrl.text,
+                            );
+                          } else if (inputType == 'income') {
+                            await _addMonthIncome(
+                              selectedCategory,
+                              int.tryParse(amountCtrl.text) ?? 0,
+                              inputDay?.toString() ?? '',
+                              commentCtrl.text,
+                            );
+                          } else {
+                            await _addMonthExpense(
+                              selectedCategory,
+                              int.tryParse(amountCtrl.text) ?? 0,
+                              inputDay?.toString() ?? '',
+                              commentCtrl.text,
+                            );
+                          }
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        child: Text(isEdit ? '保存' : '追加する'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
+    amountCtrl.dispose();
+    commentCtrl.dispose();
   }
 
   // ── カテゴリロード ────────────────────────────────────────────────
@@ -812,7 +672,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                     leading: const Icon(Icons.add_circle_outline),
                     title: const Text('新規作成'),
                     onTap: () async {
-                      await _showNewEntryDialog(date);
+                      await _showDailyEntryDialog(date);
                       setSheetState(() {});
                     },
                   ),
@@ -827,7 +687,13 @@ class CalendarScreenState extends State<CalendarScreen> {
                           return ListTile(
                             dense: true,
                             onTap: () async {
-                              await _showEditDailyEventDialog(e);
+                              final parts = e['storageKey']?.split('-') ?? [];
+                              final tapDate = parts.length == 3
+                                  ? DateTime(int.parse(parts[0]),
+                                      int.parse(parts[1]), int.parse(parts[2]))
+                                  : date;
+                              await _showDailyEntryDialog(tapDate,
+                                  editEvent: e);
                               setSheetState(() {});
                             },
                             leading: Container(
@@ -890,16 +756,29 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  // ── 新規エントリ入力ダイアログ ────────────────────────────────────
-  Future<void> _showNewEntryDialog(DateTime date) async {
+  // ── 日ごとエントリ入力フォーム（新規・編集共通）────────────────────
+  Future<void> _showDailyEntryDialog(DateTime date,
+      {Map<String, String>? editEvent}) async {
     await _loadCategories();
     if (!mounted) return;
-    String inputType = 'expense';
-    String? selectedCategory =
-        _expenseCategories.isNotEmpty ? _expenseCategories[0] : null;
+
+    final isEdit = editEvent != null;
+    String inputType = isEdit ? (editEvent['type'] ?? 'expense') : 'expense';
+
+    List<String> cats() =>
+        inputType == 'income' ? _incomeCategories : _expenseCategories;
+
+    String? selectedCategory = isEdit
+        ? (cats().contains(editEvent['title'])
+            ? editEvent['title']
+            : (cats().isNotEmpty ? cats()[0] : null))
+        : (cats().isNotEmpty ? cats()[0] : null);
+
     DateTime selectedDate = DateTime(date.year, date.month, date.day);
-    final amountCtrl = TextEditingController();
-    final commentCtrl = TextEditingController();
+    final amountCtrl =
+        TextEditingController(text: isEdit ? (editEvent['amount'] ?? '') : '');
+    final commentCtrl =
+        TextEditingController(text: isEdit ? (editEvent['comment'] ?? '') : '');
 
     await showDialog(
       context: context,
@@ -919,19 +798,14 @@ class CalendarScreenState extends State<CalendarScreen> {
                     children: [
                       SegmentedButton<String>(
                         segments: const [
-                          ButtonSegment(
-                              value: 'income', label: Text('収入')),
-                          ButtonSegment(
-                              value: 'expense', label: Text('支出')),
+                          ButtonSegment(value: 'income', label: Text('収入')),
+                          ButtonSegment(value: 'expense', label: Text('支出')),
                         ],
                         selected: {inputType},
                         onSelectionChanged: (s) => setDs(() {
                           inputType = s.first;
-                          final list = inputType == 'income'
-                              ? _incomeCategories
-                              : _expenseCategories;
                           selectedCategory =
-                              list.isNotEmpty ? list[0] : null;
+                              cats().isNotEmpty ? cats()[0] : null;
                         }),
                       ),
                       const SizedBox(height: 8),
@@ -952,9 +826,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                             labelText: 'カテゴリ',
                             border: OutlineInputBorder(),
                             isDense: true),
-                        items: (inputType == 'income'
-                                ? _incomeCategories
-                                : _expenseCategories)
+                        items: cats()
                             .map((c) =>
                                 DropdownMenuItem(value: c, child: Text(c)))
                             .toList(),
@@ -979,9 +851,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                             (i) {
                               final d = DateTime(selectedDate.year,
                                   selectedDate.month, i + 1);
-                              const wds = [
-                                '月', '火', '水', '木', '金', '土', '日'
-                              ];
+                              const wds = ['月', '火', '水', '木', '金', '土', '日'];
                               return DropdownMenuItem(
                                 value: d,
                                 child: Text(
@@ -1009,20 +879,29 @@ class CalendarScreenState extends State<CalendarScreen> {
                       ElevatedButton(
                         onPressed: () async {
                           if (selectedCategory == null ||
-                              amountCtrl.text.isEmpty) {
-                            return;
+                              amountCtrl.text.isEmpty) { return; }
+                          if (isEdit) {
+                            await _editDailyEvent(
+                              editEvent,
+                              selectedCategory,
+                              inputType,
+                              int.tryParse(amountCtrl.text) ?? 0,
+                              commentCtrl.text,
+                              selectedDate,
+                            );
+                          } else {
+                            final events = await FirestoreService
+                                .getDailyEntries(selectedDate);
+                            events.add({
+                              'title': selectedCategory!,
+                              'amount': amountCtrl.text,
+                              'type': inputType,
+                              'comment': commentCtrl.text,
+                            });
+                            await FirestoreService.setDailyEntries(
+                                selectedDate, events);
+                            await _loadMonthData(selectedDate);
                           }
-                          final events = await FirestoreService
-                              .getDailyEntries(selectedDate);
-                          events.add({
-                            'title': selectedCategory!,
-                            'amount': amountCtrl.text,
-                            'type': inputType,
-                            'comment': commentCtrl.text,
-                          });
-                          await FirestoreService.setDailyEntries(
-                              selectedDate, events);
-                          await _loadMonthData(selectedDate);
                           if (!mounted) return;
                           setState(() {
                             _selectedDay = selectedDate;
@@ -1030,7 +909,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                           });
                           if (ctx.mounted) Navigator.pop(ctx);
                         },
-                        child: const Text('追加する'),
+                        child: Text(isEdit ? '保存' : '追加する'),
                       ),
                     ],
                   ),
@@ -1329,7 +1208,7 @@ class CalendarScreenState extends State<CalendarScreen> {
             child: SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _showMonthInputDialog,
+                onPressed: _showMonthListDialog,
                 icon: const Icon(Icons.add, size: 18),
                 label: Text('${_focusedDay.month}月の収支を登録'),
                 style: ElevatedButton.styleFrom(
@@ -1512,6 +1391,28 @@ class CalendarScreenState extends State<CalendarScreen> {
       if (comment.isNotEmpty) comment,
     ];
     return ListTile(
+      onTap: () {
+        if (e['isFixed'] == 'true') {
+          final idx = int.tryParse(e['fixedIndex'] ?? '');
+          if (idx != null) {
+            _showMonthlyEntryFormDialog(
+              initialType: e['type'],
+              editIndex: idx,
+              editEntry: Map<String, String>.from(e),
+            );
+          }
+        } else {
+          final storageKeyParts = e['storageKey']?.split('-') ?? [];
+          if (storageKeyParts.length == 3) {
+            final tapDate = DateTime(
+              int.parse(storageKeyParts[0]),
+              int.parse(storageKeyParts[1]),
+              int.parse(storageKeyParts[2]),
+            );
+            _showDailyEntryDialog(tapDate, editEvent: e);
+          }
+        }
+      },
       title: Text('${e['date']} ${e['title']}'),
       subtitle: parts.isNotEmpty
           ? Text(parts.join('　'), style: const TextStyle(fontSize: 12))
