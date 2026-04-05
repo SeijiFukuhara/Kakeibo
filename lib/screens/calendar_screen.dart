@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
+import '../services/firestore_service.dart';
 
 class CalendarScreen extends StatefulWidget {
   final void Function(DateTime month)? onNavigateToAnalysis;
@@ -33,6 +32,9 @@ class CalendarScreenState extends State<CalendarScreen> {
   int _monthStartDay = 1;
   int _firstDayOfWeek = 0; // 0=日, 1=月, 6=土
 
+  // カレンダースワイプ用
+  double _dragOffset = 0;
+
   // 月固定エントリ（複数対応）
   List<Map<String, String>> _monthIncomeEntries = [];
   List<Map<String, String>> _monthExpenseEntries = [];
@@ -49,28 +51,17 @@ class CalendarScreenState extends State<CalendarScreen> {
 
   // ── 月固定エントリのロード ──────────────────────────────────────────
   Future<void> _loadMonthBudget(DateTime date) async {
-    final prefs = await SharedPreferences.getInstance();
-    final incomeKey = "monthly-income-${date.year}-${date.month}";
-    final expenseKey = "monthly-expense-${date.year}-${date.month}";
-    final incomeJson = prefs.getString(incomeKey);
-    final expenseJson = prefs.getString(expenseKey);
+    final incomeEntries = await FirestoreService.getMonthlyEntries('income', date);
+    final expenseEntries = await FirestoreService.getMonthlyEntries('expense', date);
     setState(() {
-      _monthIncomeEntries = incomeJson != null
-          ? List<Map<String, String>>.from(
-              json.decode(incomeJson).map((i) => Map<String, String>.from(i)))
-          : [];
-      _monthExpenseEntries = expenseJson != null
-          ? List<Map<String, String>>.from(
-              json.decode(expenseJson).map((i) => Map<String, String>.from(i)))
-          : [];
+      _monthIncomeEntries = incomeEntries;
+      _monthExpenseEntries = expenseEntries;
     });
   }
 
   // ── 月固定エントリの追加 ──────────────────────────────────────────
   Future<void> _addMonthIncome(
       String? category, int amount, String day, String comment) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = "monthly-income-${_focusedDay.year}-${_focusedDay.month}";
     final entries = List<Map<String, String>>.from(_monthIncomeEntries);
     entries.add({
       'title': category ?? '収入',
@@ -78,14 +69,12 @@ class CalendarScreenState extends State<CalendarScreen> {
       'day': day,
       'comment': comment,
     });
-    await prefs.setString(key, json.encode(entries));
+    await FirestoreService.setMonthlyEntries('income', _focusedDay, entries);
     await _loadMonthBudget(_focusedDay);
   }
 
   Future<void> _addMonthExpense(
       String? category, int amount, String day, String comment) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = "monthly-expense-${_focusedDay.year}-${_focusedDay.month}";
     final entries = List<Map<String, String>>.from(_monthExpenseEntries);
     entries.add({
       'title': category ?? '支出',
@@ -93,16 +82,14 @@ class CalendarScreenState extends State<CalendarScreen> {
       'day': day,
       'comment': comment,
     });
-    await prefs.setString(key, json.encode(entries));
+    await FirestoreService.setMonthlyEntries('expense', _focusedDay, entries);
     await _loadMonthBudget(_focusedDay);
   }
 
   // ── 月固定エントリの編集 ──────────────────────────────────────────
   Future<void> _editMonthEntry(String type, int index, String? category,
       int amount, String day, String comment) async {
-    final prefs = await SharedPreferences.getInstance();
     if (type == 'income') {
-      final key = "monthly-income-${_focusedDay.year}-${_focusedDay.month}";
       final entries = List<Map<String, String>>.from(_monthIncomeEntries);
       entries[index] = {
         'title': category ?? '収入',
@@ -110,9 +97,8 @@ class CalendarScreenState extends State<CalendarScreen> {
         'day': day,
         'comment': comment,
       };
-      await prefs.setString(key, json.encode(entries));
+      await FirestoreService.setMonthlyEntries('income', _focusedDay, entries);
     } else {
-      final key = "monthly-expense-${_focusedDay.year}-${_focusedDay.month}";
       final entries = List<Map<String, String>>.from(_monthExpenseEntries);
       entries[index] = {
         'title': category ?? '支出',
@@ -120,32 +106,21 @@ class CalendarScreenState extends State<CalendarScreen> {
         'day': day,
         'comment': comment,
       };
-      await prefs.setString(key, json.encode(entries));
+      await FirestoreService.setMonthlyEntries('expense', _focusedDay, entries);
     }
     await _loadMonthBudget(_focusedDay);
   }
 
   // ── 月固定エントリの削除 ──────────────────────────────────────────
   Future<void> _deleteMonthEntry(String type, int index) async {
-    final prefs = await SharedPreferences.getInstance();
     if (type == 'income') {
-      final key = "monthly-income-${_focusedDay.year}-${_focusedDay.month}";
       final entries = List<Map<String, String>>.from(_monthIncomeEntries);
       entries.removeAt(index);
-      if (entries.isEmpty) {
-        await prefs.remove(key);
-      } else {
-        await prefs.setString(key, json.encode(entries));
-      }
+      await FirestoreService.setMonthlyEntries('income', _focusedDay, entries);
     } else {
-      final key = "monthly-expense-${_focusedDay.year}-${_focusedDay.month}";
       final entries = List<Map<String, String>>.from(_monthExpenseEntries);
       entries.removeAt(index);
-      if (entries.isEmpty) {
-        await prefs.remove(key);
-      } else {
-        await prefs.setString(key, json.encode(entries));
-      }
+      await FirestoreService.setMonthlyEntries('expense', _focusedDay, entries);
     }
     await _loadMonthBudget(_focusedDay);
   }
@@ -155,18 +130,80 @@ class CalendarScreenState extends State<CalendarScreen> {
       Map<String, String> event, String? category, int amount, String comment) async {
     final storageKey = event['storageKey']!;
     final eventIndex = int.parse(event['eventIndex']!);
-    final prefs = await SharedPreferences.getInstance();
-    final jsonStr = prefs.getString(storageKey);
-    if (jsonStr == null) return;
-    final decoded = json.decode(jsonStr) as List;
-    decoded[eventIndex] = {
-      'title': category ?? decoded[eventIndex]['title'],
+    final parts = storageKey.split('-');
+    final date = DateTime(
+        int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+    final entries = await FirestoreService.getDailyEntries(date);
+    if (eventIndex >= entries.length) return;
+    entries[eventIndex] = {
+      'title': category ?? entries[eventIndex]['title']!,
       'amount': '$amount',
-      'type': event['type'],
+      'type': event['type']!,
       'comment': comment,
     };
-    await prefs.setString(storageKey, json.encode(decoded));
+    await FirestoreService.setDailyEntries(date, entries);
     await _loadMonthData(_focusedDay);
+  }
+
+  // ── 年月選択ピッカー ────────────────────────────────────────────────
+  void _showMonthPicker() {
+    int tempYear = _focusedDay.year;
+    int tempMonth = _focusedDay.month;
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => AlertDialog(
+          content: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              DropdownButton<int>(
+                value: tempYear,
+                items: List.generate(
+                  11,
+                  (i) => DropdownMenuItem(
+                    value: DateTime.now().year - 5 + i,
+                    child: Text('${DateTime.now().year - 5 + i}年'),
+                  ),
+                ),
+                onChanged: (v) {
+                  if (v != null) setDs(() => tempYear = v);
+                },
+              ),
+              const SizedBox(width: 12),
+              DropdownButton<int>(
+                value: tempMonth,
+                items: List.generate(
+                  12,
+                  (i) => DropdownMenuItem(
+                    value: i + 1,
+                    child: Text('${i + 1}月'),
+                  ),
+                ),
+                onChanged: (v) {
+                  if (v != null) setDs(() => tempMonth = v);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('キャンセル'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final newDay = DateTime(tempYear, tempMonth);
+                setState(() => _focusedDay = newDay);
+                _loadMonthData(newDay);
+                _loadMonthBudget(newDay);
+                Navigator.pop(ctx);
+              },
+              child: const Text('決定'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ── 月入力ダイアログ（ヘッダータップ用）────────────────────────────
@@ -600,18 +637,18 @@ class CalendarScreenState extends State<CalendarScreen> {
 
   // ── カテゴリロード ────────────────────────────────────────────────
   Future<void> _loadCategories() async {
-    final prefs = await SharedPreferences.getInstance();
+    final data = await FirestoreService.getSettings();
     setState(() {
-      _monthStartDay = prefs.getInt('month_start_day') ?? 1;
-      _firstDayOfWeek = prefs.getInt('first_day_of_week') ?? 0;
-      _expenseCategories =
-          prefs.getStringList('categories') ?? ['食費', '日用品', '交通費'];
-      _incomeCategories =
-          prefs.getStringList('income_categories') ?? ['給与', '副収入', 'その他'];
-      _monthlyExpenseCats =
-          prefs.getStringList('monthly_expense_categories') ?? ['家賃', '光熱費', '通信費'];
-      _monthlyIncomeCats =
-          prefs.getStringList('monthly_income_categories') ?? ['給与', '副収入'];
+      _monthStartDay = (data['month_start_day'] as int?) ?? 1;
+      _firstDayOfWeek = (data['first_day_of_week'] as int?) ?? 0;
+      _expenseCategories = List<String>.from(
+          data['categories'] ?? ['食費', '日用品', '交通費']);
+      _incomeCategories = List<String>.from(
+          data['income_categories'] ?? ['給与', '副収入', 'その他']);
+      _monthlyExpenseCats = List<String>.from(
+          data['monthly_expense_categories'] ?? ['家賃', '光熱費', '通信費']);
+      _monthlyIncomeCats = List<String>.from(
+          data['monthly_income_categories'] ?? ['給与', '副収入']);
     });
   }
 
@@ -632,13 +669,14 @@ class CalendarScreenState extends State<CalendarScreen> {
 
   // ── 月データロード ────────────────────────────────────────────────
   Future<void> _loadMonthData(DateTime date) async {
-    final prefs = await SharedPreferences.getInstance();
-    _monthStartDay = prefs.getInt('month_start_day') ?? 1;
+    final settings = await FirestoreService.getSettings();
+    _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
     final (rangeStart, rangeEnd) = _getMonthRange(date);
     final monthEvents = <Map<String, String>>[];
 
-    for (final key in prefs.getKeys()) {
-      if (!key.contains('-')) continue;
+    final allEntries = await FirestoreService.getAllDailyEntries();
+    for (final entry in allEntries.entries) {
+      final key = entry.key;
       final parts = key.split('-');
       if (parts.length != 3) continue;
 
@@ -650,14 +688,9 @@ class CalendarScreenState extends State<CalendarScreen> {
       final keyDate = DateTime(year, month, day);
       if (keyDate.isBefore(rangeStart) || keyDate.isAfter(rangeEnd)) continue;
 
-      final jsonString = prefs.getString(key);
-      if (jsonString == null) continue;
-
-      final decoded = json.decode(jsonString);
-      if (decoded is! List) continue;
-
+      final decoded = entry.value;
       for (var i = 0; i < decoded.length; i++) {
-        final event = Map<String, String>.from(decoded[i] as Map);
+        final event = decoded[i];
         monthEvents.add({
           'title': event['title'] ?? '',
           'amount': event['amount'] ?? '0',
@@ -686,16 +719,14 @@ class CalendarScreenState extends State<CalendarScreen> {
     final storageKey = event['storageKey'];
     final eventIndex = int.tryParse(event['eventIndex'] ?? '');
     if (storageKey == null || eventIndex == null) return;
-    final prefs = await SharedPreferences.getInstance();
-    final jsonString = prefs.getString(storageKey);
-    if (jsonString == null) return;
-    final decoded = json.decode(jsonString) as List;
-    decoded.removeAt(eventIndex);
-    if (decoded.isEmpty) {
-      await prefs.remove(storageKey);
-    } else {
-      await prefs.setString(storageKey, json.encode(decoded));
-    }
+    final parts = storageKey.split('-');
+    if (parts.length != 3) return;
+    final date = DateTime(
+        int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+    final entries = await FirestoreService.getDailyEntries(date);
+    if (eventIndex >= entries.length) return;
+    entries.removeAt(eventIndex);
+    await FirestoreService.setDailyEntries(date, entries);
     await _loadMonthData(_focusedDay);
   }
 
@@ -747,53 +778,58 @@ class CalendarScreenState extends State<CalendarScreen> {
   }
 
   // ── 日付タップ入力ダイアログ ─────────────────────────────────────
+  // ── 日付タップ: 履歴＋新規作成ダイアログ（中央表示）───────────────
   void _showInputSheet(DateTime date) {
-    _loadCategories();
-    String inputType = 'expense';
-    String? selectedCategory =
-        _expenseCategories.isNotEmpty ? _expenseCategories[0] : null;
-    DateTime selectedDate = DateTime(date.year, date.month, date.day);
-    final amountCtrl = TextEditingController();
-    final commentCtrl = TextEditingController();
+    const wds = ['月', '火', '水', '木', '金', '土', '日'];
+    final wd = wds[date.weekday - 1];
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
-          final dateKey =
-              '${selectedDate.year}-${selectedDate.month}-${selectedDate.day}';
+          final dateKey = '${date.year}-${date.month}-${date.day}';
           final dayEvents = _monthlyEvents
               .where((e) => e['storageKey'] == dateKey)
               .toList();
 
           return Dialog(
-            child: Container(
-              width: 420,
-              constraints: const BoxConstraints(maxHeight: 620),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400, maxHeight: 500),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // 履歴リスト
-                  if (dayEvents.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
-                      child: Text('履歴',
-                          style: TextStyle(
-                              fontSize: 12, color: Colors.grey)),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Text(
+                      '${date.month}月${date.day}日（$wd）',
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.bold),
                     ),
-                    const Divider(height: 8),
+                  ),
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.add_circle_outline),
+                    title: const Text('新規作成'),
+                    onTap: () async {
+                      await _showNewEntryDialog(date);
+                      setSheetState(() {});
+                    },
+                  ),
+                  if (dayEvents.isNotEmpty) ...[
+                    const Divider(height: 1),
                     Flexible(
-                      child: ListView.builder(
+                      child: ListView(
                         shrinkWrap: true,
-                        itemCount: dayEvents.length,
-                        itemBuilder: (ctx, i) {
-                          final e = dayEvents[i];
+                        children: dayEvents.map((e) {
                           final isIncome = e['type'] == 'income';
-                          final color =
-                              isIncome ? Colors.green : Colors.red;
+                          final color = isIncome ? Colors.green : Colors.red;
                           return ListTile(
                             dense: true,
+                            onTap: () async {
+                              await _showEditDailyEventDialog(e);
+                              setSheetState(() {});
+                            },
                             leading: Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
@@ -803,16 +839,14 @@ class CalendarScreenState extends State<CalendarScreen> {
                               ),
                               child: Text(
                                 isIncome ? '収入' : '支出',
-                                style: TextStyle(
-                                    color: color, fontSize: 11),
+                                style: TextStyle(color: color, fontSize: 11),
                               ),
                             ),
                             title: Text(e['title'] ?? '',
                                 style: const TextStyle(fontSize: 13)),
                             subtitle: e['comment']?.isNotEmpty == true
                                 ? Text(e['comment']!,
-                                    style:
-                                        const TextStyle(fontSize: 11))
+                                    style: const TextStyle(fontSize: 11))
                                 : null,
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -824,20 +858,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                                       fontWeight: FontWeight.bold),
                                 ),
                                 IconButton(
-                                  icon: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                      minWidth: 32, minHeight: 32),
-                                  onPressed: () async {
-                                    await _showEditDailyEventDialog(e);
-                                    setSheetState(() {});
-                                  },
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                      Icons.delete_outline,
+                                  icon: const Icon(Icons.delete_outline,
                                       size: 18),
                                   padding: EdgeInsets.zero,
                                   constraints: const BoxConstraints(
@@ -850,141 +871,15 @@ class CalendarScreenState extends State<CalendarScreen> {
                               ],
                             ),
                           );
-                        },
+                        }).toList(),
                       ),
                     ),
                   ],
-
-                  const Divider(height: 8),
-
-                  // 入力フォーム
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SegmentedButton<String>(
-                          segments: const [
-                            ButtonSegment(
-                                value: 'income', label: Text('収入')),
-                            ButtonSegment(
-                                value: 'expense', label: Text('支出')),
-                          ],
-                          selected: {inputType},
-                          onSelectionChanged: (s) =>
-                              setSheetState(() {
-                            inputType = s.first;
-                            final list = inputType == 'income'
-                                ? _incomeCategories
-                                : _expenseCategories;
-                            selectedCategory =
-                                list.isNotEmpty ? list[0] : null;
-                          }),
-                        ),
-                        const SizedBox(height: 4),
-                        TextField(
-                          controller: amountCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                              labelText: '金額', suffixText: '円'),
-                        ),
-                        DropdownButton<String>(
-                          value: selectedCategory,
-                          isExpanded: true,
-                          items: (inputType == 'income'
-                                  ? _incomeCategories
-                                  : _expenseCategories)
-                              .map((c) =>
-                                  DropdownMenuItem(value: c, child: Text(c)))
-                              .toList(),
-                          onChanged: (v) =>
-                              setSheetState(() => selectedCategory = v),
-                        ),
-                        TextField(
-                          controller: commentCtrl,
-                          decoration: const InputDecoration(
-                              labelText: 'メモ（任意）'),
-                        ),
-                        const SizedBox(height: 4),
-                        DropdownButtonHideUnderline(
-                          child: DropdownButton<DateTime>(
-                            value: selectedDate,
-                            isExpanded: true,
-                            items: List.generate(
-                              DateUtils.getDaysInMonth(
-                                  selectedDate.year, selectedDate.month),
-                              (i) {
-                                final d = DateTime(selectedDate.year,
-                                    selectedDate.month, i + 1);
-                                const wds = ['月', '火', '水', '木', '金', '土', '日'];
-                                return DropdownMenuItem(
-                                  value: d,
-                                  child: Text(
-                                      '${d.month}月${d.day}日（${wds[d.weekday - 1]}）'),
-                                );
-                              },
-                            ),
-                            onChanged: (d) {
-                              if (d != null) {
-                                setSheetState(() => selectedDate = d);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // ボタン
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text('閉じる'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () async {
-                            if (selectedCategory == null ||
-                                amountCtrl.text.isEmpty) {
-                              return;
-                            }
-
-                            final prefs =
-                                await SharedPreferences.getInstance();
-                            final key =
-                                '${selectedDate.year}-${selectedDate.month}-${selectedDate.day}';
-                            final jsonStr = prefs.getString(key);
-                            final events = jsonStr != null
-                                ? List<Map<String, String>>.from(
-                                    json.decode(jsonStr).map(
-                                        (i) => Map<String, String>.from(i)))
-                                : <Map<String, String>>[];
-                            events.add({
-                              'title': selectedCategory!,
-                              'amount': amountCtrl.text,
-                              'type': inputType,
-                              'comment': commentCtrl.text,
-                            });
-                            await prefs.setString(key, json.encode(events));
-                            await _loadMonthData(selectedDate);
-
-                            if (!mounted) return;
-                            setState(() {
-                              _selectedDay = selectedDate;
-                              _focusedDay = selectedDate;
-                            });
-
-                            amountCtrl.clear();
-                            commentCtrl.clear();
-                            setSheetState(() {});
-                          },
-                          child: const Text('追加する'),
-                        ),
-                      ],
-                    ),
+                  const Divider(height: 1),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('キャンセル',
+                        style: TextStyle(color: Colors.grey)),
                   ),
                 ],
               ),
@@ -993,6 +888,161 @@ class CalendarScreenState extends State<CalendarScreen> {
         },
       ),
     );
+  }
+
+  // ── 新規エントリ入力ダイアログ ────────────────────────────────────
+  Future<void> _showNewEntryDialog(DateTime date) async {
+    await _loadCategories();
+    if (!mounted) return;
+    String inputType = 'expense';
+    String? selectedCategory =
+        _expenseCategories.isNotEmpty ? _expenseCategories[0] : null;
+    DateTime selectedDate = DateTime(date.year, date.month, date.day);
+    final amountCtrl = TextEditingController();
+    final commentCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => Dialog(
+          child: Container(
+            width: 420,
+            constraints: const BoxConstraints(maxHeight: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(
+                              value: 'income', label: Text('収入')),
+                          ButtonSegment(
+                              value: 'expense', label: Text('支出')),
+                        ],
+                        selected: {inputType},
+                        onSelectionChanged: (s) => setDs(() {
+                          inputType = s.first;
+                          final list = inputType == 'income'
+                              ? _incomeCategories
+                              : _expenseCategories;
+                          selectedCategory =
+                              list.isNotEmpty ? list[0] : null;
+                        }),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: amountCtrl,
+                        keyboardType: TextInputType.number,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                            labelText: '金額',
+                            suffixText: '円',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCategory,
+                        decoration: const InputDecoration(
+                            labelText: 'カテゴリ',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                        items: (inputType == 'income'
+                                ? _incomeCategories
+                                : _expenseCategories)
+                            .map((c) =>
+                                DropdownMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                        onChanged: (v) => setDs(() => selectedCategory = v),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: commentCtrl,
+                        decoration: const InputDecoration(
+                            labelText: 'メモ（任意）',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<DateTime>(
+                          value: selectedDate,
+                          isExpanded: true,
+                          items: List.generate(
+                            DateUtils.getDaysInMonth(
+                                selectedDate.year, selectedDate.month),
+                            (i) {
+                              final d = DateTime(selectedDate.year,
+                                  selectedDate.month, i + 1);
+                              const wds = [
+                                '月', '火', '水', '木', '金', '土', '日'
+                              ];
+                              return DropdownMenuItem(
+                                value: d,
+                                child: Text(
+                                    '${d.month}月${d.day}日（${wds[d.weekday - 1]}）'),
+                              );
+                            },
+                          ),
+                          onChanged: (d) {
+                            if (d != null) setDs(() => selectedDate = d);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('キャンセル'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          if (selectedCategory == null ||
+                              amountCtrl.text.isEmpty) {
+                            return;
+                          }
+                          final events = await FirestoreService
+                              .getDailyEntries(selectedDate);
+                          events.add({
+                            'title': selectedCategory!,
+                            'amount': amountCtrl.text,
+                            'type': inputType,
+                            'comment': commentCtrl.text,
+                          });
+                          await FirestoreService.setDailyEntries(
+                              selectedDate, events);
+                          await _loadMonthData(selectedDate);
+                          if (!mounted) return;
+                          setState(() {
+                            _selectedDay = selectedDate;
+                            _focusedDay = selectedDate;
+                          });
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        child: const Text('追加する'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    amountCtrl.dispose();
+    commentCtrl.dispose();
   }
 
   // ── 金額フォーマット ──────────────────────────────────────────────
@@ -1017,19 +1067,19 @@ class CalendarScreenState extends State<CalendarScreen> {
           border: Border.all(color: Colors.grey.shade300, width: 0.5),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(2),
+          padding: const EdgeInsets.all(1),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 日付：上段
               Container(
-                width: 22,
-                height: 22,
+                width: 18,
+                height: 18,
                 decoration: circleDecoration,
                 child: Center(
                   child: Text(
                     '${day.day}',
-                    style: TextStyle(fontSize: 12, color: dayTextColor),
+                    style: TextStyle(fontSize: 10, color: dayTextColor),
                   ),
                 ),
               ),
@@ -1043,14 +1093,14 @@ class CalendarScreenState extends State<CalendarScreen> {
                       Text(
                         income > 0 ? _formatAmount(income) : '',
                         style: const TextStyle(
-                            color: Colors.green, fontSize: 11),
+                            color: Colors.green, fontSize: 9),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
                       Text(
                         expense > 0 ? _formatAmount(expense) : '',
                         style: const TextStyle(
-                            color: Colors.red, fontSize: 11),
+                            color: Colors.red, fontSize: 9),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
                       ),
@@ -1061,6 +1111,30 @@ class CalendarScreenState extends State<CalendarScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryTile(String label, int amount, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: TextStyle(fontSize: 10, color: color)),
+          Text(
+            '¥${_formatAmount(amount)}',
+            style: TextStyle(
+                fontSize: 12, fontWeight: FontWeight.bold, color: color),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }
@@ -1135,18 +1209,40 @@ class CalendarScreenState extends State<CalendarScreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('カレンダー'),
-      ),
-      body: Column(
+      body: SafeArea(
+        child: Column(
         children: [
-              TableCalendar(
+              GestureDetector(
+            onHorizontalDragUpdate: (details) {
+              setState(() => _dragOffset += details.delta.dx);
+            },
+            onHorizontalDragEnd: (details) {
+              final screenWidth = MediaQuery.of(context).size.width;
+              final threshold = screenWidth / 3;
+              if (_dragOffset < -threshold) {
+                final next = DateTime(_focusedDay.year, _focusedDay.month + 1);
+                setState(() { _focusedDay = next; _dragOffset = 0; });
+                _loadMonthData(next);
+                _loadMonthBudget(next);
+              } else if (_dragOffset > threshold) {
+                final prev = DateTime(_focusedDay.year, _focusedDay.month - 1);
+                setState(() { _focusedDay = prev; _dragOffset = 0; });
+                _loadMonthData(prev);
+                _loadMonthBudget(prev);
+              } else {
+                setState(() => _dragOffset = 0);
+              }
+            },
+            child: Transform.translate(
+              offset: Offset(_dragOffset, 0),
+              child: TableCalendar(
+            availableGestures: AvailableGestures.none,
             firstDay: DateTime.utc(2020, 1, 1),
             lastDay: DateTime.utc(2030, 12, 31),
             focusedDay: _focusedDay,
             locale: 'ja_JP',
-            rowHeight: 68,
-            daysOfWeekHeight: 36,
+            rowHeight: 52,
+            daysOfWeekHeight: 28,
             startingDayOfWeek: switch (_firstDayOfWeek) {
               1 => StartingDayOfWeek.monday,
               6 => StartingDayOfWeek.saturday,
@@ -1163,8 +1259,7 @@ class CalendarScreenState extends State<CalendarScreen> {
               _loadMonthData(selectedDay);
               _showInputSheet(selectedDay);
             },
-            onHeaderTapped: (_) =>
-                widget.onNavigateToAnalysis?.call(_focusedDay),
+            onHeaderTapped: (_) => _showMonthPicker(),
             onPageChanged: (focusedDay) {
               setState(() {
                 _focusedDay = focusedDay;
@@ -1197,69 +1292,17 @@ class CalendarScreenState extends State<CalendarScreen> {
               ),
               headerTitleBuilder: (context, day) {
                 return InkWell(
-                  onTap: () =>
-                      widget.onNavigateToAnalysis?.call(_focusedDay),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
+                  onTap: _showMonthPicker,
+                  child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .primaryColor
-                          .withValues(alpha: 0.08),
-                      border: Border.all(
-                          color: Theme.of(context).primaryColor,
-                          width: 1.2),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.bar_chart,
-                            size: 20,
-                            color: Theme.of(context).primaryColor),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${day.year}年${day.month}月',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).primaryColor,
-                          ),
-                        ),
-                        const Spacer(),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '収入 ¥${_formatAmount(totalIncome)}',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.green,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              '支出 ¥${_formatAmount(totalExpense)}',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.red,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              '合計 ¥${_formatAmount(balance)}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: balance >= 0
-                                    ? Colors.blue
-                                    : Colors.orange,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                        horizontal: 4, vertical: 8),
+                    child: Text(
+                      '${day.year}年${day.month}月',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).primaryColor,
+                      ),
                     ),
                   ),
                 );
@@ -1276,6 +1319,8 @@ class CalendarScreenState extends State<CalendarScreen> {
               ),
             ),
           ),
+          ),
+          ),
 
           // 月の収支登録ボタン
           Padding(
@@ -1291,6 +1336,30 @@ class CalendarScreenState extends State<CalendarScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
               ),
+            ),
+          ),
+
+          // 月合計バー
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildSummaryTile('収入', totalIncome, Colors.green),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _buildSummaryTile('支出', totalExpense, Colors.red),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: _buildSummaryTile(
+                    '合計',
+                    balance,
+                    balance >= 0 ? Colors.blue : Colors.orange,
+                  ),
+                ),
+              ],
             ),
           ),
 
@@ -1430,6 +1499,7 @@ class CalendarScreenState extends State<CalendarScreen> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

@@ -2,6 +2,9 @@
 cmake_minimum_required(VERSION 3.14)
 project(kakeibo_app_mvp_2 LANGUAGES CXX)
 
+# Firebase C++ SDK uses old CMake syntax; suppress compatibility error.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "kakeibo_app_mvp_2")

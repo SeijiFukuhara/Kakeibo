@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart' hide TextDirection;
-import 'dart:convert';
 import 'dart:math';
+import '../services/firestore_service.dart';
 
 // カテゴリ色パレット
 const _palette = [
@@ -90,15 +89,16 @@ class AnalysisScreenState extends State<AnalysisScreen>
   }
 
   Future<void> _loadMonthlyData() async {
-    final prefs = await SharedPreferences.getInstance();
-    _monthStartDay = prefs.getInt('month_start_day') ?? 1;
+    final settings = await FirestoreService.getSettings();
+    _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
     final expMap = <String, int>{};
     final incMap = <String, int>{};
     int totalInc = 0;
     int totalExp = 0;
 
-    for (final key in prefs.getKeys()) {
-      final parts = key.split('-');
+    final allDaily = await FirestoreService.getAllDailyEntries();
+    for (final entry in allDaily.entries) {
+      final parts = entry.key.split('-');
       if (parts.length != 3) continue;
       final year = int.tryParse(parts[0]);
       final month = int.tryParse(parts[1]);
@@ -108,13 +108,7 @@ class AnalysisScreenState extends State<AnalysisScreen>
       final (lYear, lMonth) = _logicalYearMonth(DateTime(year, month, day));
       if (lYear != _month.year || lMonth != _month.month) continue;
 
-      final jsonStr = prefs.getString(key);
-      if (jsonStr == null) continue;
-      final decoded = json.decode(jsonStr);
-      if (decoded is! List) continue;
-
-      for (final item in decoded) {
-        final e = Map<String, String>.from(item as Map);
+      for (final e in entry.value) {
         final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
         final category = e['title'] ?? '不明';
         if (e['type'] == 'income') {
@@ -127,28 +121,19 @@ class AnalysisScreenState extends State<AnalysisScreen>
       }
     }
 
-    final incomeKey = 'monthly-income-${_month.year}-${_month.month}';
-    final expenseKey = 'monthly-expense-${_month.year}-${_month.month}';
-    final incomeJson = prefs.getString(incomeKey);
-    final expenseJson = prefs.getString(expenseKey);
-
-    if (incomeJson != null) {
-      for (final item in json.decode(incomeJson) as List) {
-        final e = Map<String, String>.from(item as Map);
-        final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
-        final category = e['title'] ?? '収入';
-        incMap[category] = (incMap[category] ?? 0) + amount;
-        totalInc += amount;
-      }
+    final incomeEntries = await FirestoreService.getMonthlyEntries('income', _month);
+    final expenseEntries = await FirestoreService.getMonthlyEntries('expense', _month);
+    for (final e in incomeEntries) {
+      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+      final category = e['title'] ?? '収入';
+      incMap[category] = (incMap[category] ?? 0) + amount;
+      totalInc += amount;
     }
-    if (expenseJson != null) {
-      for (final item in json.decode(expenseJson) as List) {
-        final e = Map<String, String>.from(item as Map);
-        final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
-        final category = e['title'] ?? '支出';
-        expMap[category] = (expMap[category] ?? 0) + amount;
-        totalExp += amount;
-      }
+    for (final e in expenseEntries) {
+      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+      final category = e['title'] ?? '支出';
+      expMap[category] = (expMap[category] ?? 0) + amount;
+      totalExp += amount;
     }
 
     if (!mounted) return;
@@ -161,8 +146,8 @@ class AnalysisScreenState extends State<AnalysisScreen>
   }
 
   Future<void> _loadYearlyData() async {
-    final prefs = await SharedPreferences.getInstance();
-    _monthStartDay = prefs.getInt('month_start_day') ?? 1;
+    final settings = await FirestoreService.getSettings();
+    _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
     final monthlyData =
         List.generate(12, (_) => {'income': 0, 'expense': 0});
     final expMap = <String, int>{};
@@ -172,8 +157,9 @@ class AnalysisScreenState extends State<AnalysisScreen>
     int totalInc = 0;
     int totalExp = 0;
 
-    for (final key in prefs.getKeys()) {
-      final parts = key.split('-');
+    final allDaily = await FirestoreService.getAllDailyEntries();
+    for (final entry in allDaily.entries) {
+      final parts = entry.key.split('-');
       if (parts.length != 3) continue;
       final year = int.tryParse(parts[0]);
       final month = int.tryParse(parts[1]);
@@ -183,13 +169,7 @@ class AnalysisScreenState extends State<AnalysisScreen>
       final (lYear, lMonth) = _logicalYearMonth(DateTime(year, month, day));
       if (lYear != _year || lMonth < 1 || lMonth > 12) continue;
 
-      final jsonStr = prefs.getString(key);
-      if (jsonStr == null) continue;
-      final decoded = json.decode(jsonStr);
-      if (decoded is! List) continue;
-
-      for (final item in decoded) {
-        final e = Map<String, String>.from(item as Map);
+      for (final e in entry.value) {
         final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
         final category = e['title'] ?? '不明';
         if (e['type'] == 'income') {
@@ -210,16 +190,19 @@ class AnalysisScreenState extends State<AnalysisScreen>
       }
     }
 
-    for (int m = 1; m <= 12; m++) {
-      final incomeKey = 'monthly-income-$_year-$m';
-      final expenseKey = 'monthly-expense-$_year-$m';
-      final incomeJson = prefs.getString(incomeKey);
-      final expenseJson = prefs.getString(expenseKey);
+    final allMonthly = await FirestoreService.getAllMonthlyEntries();
+    for (final entry in allMonthly.entries) {
+      // キー形式: "income-yyyy-m" or "expense-yyyy-m"
+      final parts = entry.key.split('-');
+      if (parts.length != 3) continue;
+      final type = parts[0]; // 'income' or 'expense'
+      final year = int.tryParse(parts[1]);
+      final m = int.tryParse(parts[2]);
+      if (year == null || m == null || year != _year || m < 1 || m > 12) continue;
 
-      if (incomeJson != null) {
-        for (final item in json.decode(incomeJson) as List) {
-          final e = Map<String, String>.from(item as Map);
-          final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+      for (final e in entry.value) {
+        final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+        if (type == 'income') {
           final category = e['title'] ?? '収入';
           monthlyData[m - 1]['income'] =
               (monthlyData[m - 1]['income'] ?? 0) + amount;
@@ -227,12 +210,7 @@ class AnalysisScreenState extends State<AnalysisScreen>
           incCatMonthly.putIfAbsent(category, () => List.filled(12, 0));
           incCatMonthly[category]![m - 1] += amount;
           totalInc += amount;
-        }
-      }
-      if (expenseJson != null) {
-        for (final item in json.decode(expenseJson) as List) {
-          final e = Map<String, String>.from(item as Map);
-          final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+        } else {
           final category = e['title'] ?? '支出';
           monthlyData[m - 1]['expense'] =
               (monthlyData[m - 1]['expense'] ?? 0) + amount;
@@ -269,7 +247,7 @@ class AnalysisScreenState extends State<AnalysisScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('分析'),
+        toolbarHeight: 0,
         bottom: TabBar(
           controller: _tabController,
           tabs: const [

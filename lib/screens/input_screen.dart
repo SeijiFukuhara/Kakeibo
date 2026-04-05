@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
-import 'dart:convert';
+import '../services/firestore_service.dart';
 
 class InputScreen extends StatefulWidget {
   const InputScreen({super.key});
@@ -59,18 +58,17 @@ class _InputScreenState extends State<InputScreen> {
   }
 
   Future<void> _loadCategories() async {
-    final prefs = await SharedPreferences.getInstance();
+    final data = await FirestoreService.getSettings();
     setState(() {
-      _expenseCategories =
-          prefs.getStringList('categories') ?? ['食費', '日用品', '交通費'];
-      _incomeCategories =
-          prefs.getStringList('income_categories') ?? ['給与', '副収入', 'その他'];
-      _monthlyExpenseCats =
-          prefs.getStringList('monthly_expense_categories') ?? ['家賃', '光熱費', '通信費'];
-      _monthlyIncomeCats =
-          prefs.getStringList('monthly_income_categories') ?? ['給与', '副収入'];
+      _expenseCategories = List<String>.from(
+          data['categories'] ?? ['食費', '日用品', '交通費']);
+      _incomeCategories = List<String>.from(
+          data['income_categories'] ?? ['給与', '副収入', 'その他']);
+      _monthlyExpenseCats = List<String>.from(
+          data['monthly_expense_categories'] ?? ['家賃', '光熱費', '通信費']);
+      _monthlyIncomeCats = List<String>.from(
+          data['monthly_income_categories'] ?? ['給与', '副収入']);
 
-      // カテゴリ変更後に選択値をリセット
       _dailyCategory = _currentDailyCats.isNotEmpty ? _currentDailyCats[0] : null;
       _monthlyCategory =
           _currentMonthlyCats.isNotEmpty ? _currentMonthlyCats[0] : null;
@@ -84,36 +82,15 @@ class _InputScreenState extends State<InputScreen> {
       _inputType == 'income' ? _monthlyIncomeCats : _monthlyExpenseCats;
 
   Future<void> _loadDailyEntries() async {
-    final prefs = await SharedPreferences.getInstance();
-    final key =
-        '${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}';
-    final jsonStr = prefs.getString(key);
-    setState(() {
-      _dailyEntries = jsonStr != null
-          ? List<Map<String, String>>.from(
-              json.decode(jsonStr).map((i) => Map<String, String>.from(i)))
-          : [];
-    });
+    final entries = await FirestoreService.getDailyEntries(_selectedDate);
+    setState(() => _dailyEntries = entries);
   }
 
   Future<void> _loadMonthlyEntries() async {
-    final prefs = await SharedPreferences.getInstance();
-    final incomeKey =
-        'monthly-income-${_selectedMonth.year}-${_selectedMonth.month}';
-    final expenseKey =
-        'monthly-expense-${_selectedMonth.year}-${_selectedMonth.month}';
-    final incomeJson = prefs.getString(incomeKey);
-    final expenseJson = prefs.getString(expenseKey);
-
-    final incomeEntries = incomeJson != null
-        ? List<Map<String, String>>.from(
-            json.decode(incomeJson).map((i) => Map<String, String>.from(i)))
-        : <Map<String, String>>[];
-    final expenseEntries = expenseJson != null
-        ? List<Map<String, String>>.from(
-            json.decode(expenseJson).map((i) => Map<String, String>.from(i)))
-        : <Map<String, String>>[];
-
+    final incomeEntries =
+        await FirestoreService.getMonthlyEntries('income', _selectedMonth);
+    final expenseEntries =
+        await FirestoreService.getMonthlyEntries('expense', _selectedMonth);
     setState(() {
       _monthlyEntries = [
         ...incomeEntries.map((e) => {...e, 'entryType': 'income'}),
@@ -127,21 +104,14 @@ class _InputScreenState extends State<InputScreen> {
     final amount = int.tryParse(_amountCtrl.text);
     if (amount == null || amount <= 0 || _dailyCategory == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final key =
-        '${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}';
-    final jsonStr = prefs.getString(key);
-    final entries = jsonStr != null
-        ? List<Map<String, String>>.from(
-            json.decode(jsonStr).map((i) => Map<String, String>.from(i)))
-        : <Map<String, String>>[];
+    final entries = await FirestoreService.getDailyEntries(_selectedDate);
     entries.add({
       'title': _dailyCategory!,
       'amount': '$amount',
       'type': _inputType,
       'comment': _commentCtrl.text,
     });
-    await prefs.setString(key, json.encode(entries));
+    await FirestoreService.setDailyEntries(_selectedDate, entries);
 
     _amountCtrl.clear();
     _commentCtrl.clear();
@@ -153,22 +123,15 @@ class _InputScreenState extends State<InputScreen> {
     final amount = int.tryParse(_amountCtrl.text);
     if (amount == null || amount <= 0 || _monthlyCategory == null) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final key = _inputType == 'income'
-        ? 'monthly-income-${_selectedMonth.year}-${_selectedMonth.month}'
-        : 'monthly-expense-${_selectedMonth.year}-${_selectedMonth.month}';
-    final jsonStr = prefs.getString(key);
-    final entries = jsonStr != null
-        ? List<Map<String, String>>.from(
-            json.decode(jsonStr).map((i) => Map<String, String>.from(i)))
-        : <Map<String, String>>[];
+    final entries =
+        await FirestoreService.getMonthlyEntries(_inputType, _selectedMonth);
     entries.add({
       'title': _monthlyCategory!,
       'amount': '$amount',
       'day': _monthlyDay?.toString() ?? '',
       'comment': _commentCtrl.text,
     });
-    await prefs.setString(key, json.encode(entries));
+    await FirestoreService.setMonthlyEntries(_inputType, _selectedMonth, entries);
 
     _amountCtrl.clear();
     _commentCtrl.clear();
@@ -178,39 +141,18 @@ class _InputScreenState extends State<InputScreen> {
 
   // ── 日ごとエントリ削除 ──────────────────────────────────────────────
   Future<void> _deleteDailyEntry(int index) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key =
-        '${_selectedDate.year}-${_selectedDate.month}-${_selectedDate.day}';
-    final jsonStr = prefs.getString(key);
-    if (jsonStr == null) return;
-    final entries = List<Map<String, String>>.from(
-        json.decode(jsonStr).map((i) => Map<String, String>.from(i)));
+    final entries = await FirestoreService.getDailyEntries(_selectedDate);
     entries.removeAt(index);
-    if (entries.isEmpty) {
-      await prefs.remove(key);
-    } else {
-      await prefs.setString(key, json.encode(entries));
-    }
+    await FirestoreService.setDailyEntries(_selectedDate, entries);
     await _loadDailyEntries();
   }
 
   // ── 月ごとエントリ削除 ──────────────────────────────────────────────
-  // [index] は同じentryType内でのインデックス（=prefs配列のインデックス）
   Future<void> _deleteMonthlyEntry(String entryType, int index) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = entryType == 'income'
-        ? 'monthly-income-${_selectedMonth.year}-${_selectedMonth.month}'
-        : 'monthly-expense-${_selectedMonth.year}-${_selectedMonth.month}';
-    final jsonStr = prefs.getString(key);
-    if (jsonStr == null) return;
-    final entries = List<Map<String, String>>.from(
-        json.decode(jsonStr).map((i) => Map<String, String>.from(i)));
+    final entries =
+        await FirestoreService.getMonthlyEntries(entryType, _selectedMonth);
     entries.removeAt(index);
-    if (entries.isEmpty) {
-      await prefs.remove(key);
-    } else {
-      await prefs.setString(key, json.encode(entries));
-    }
+    await FirestoreService.setMonthlyEntries(entryType, _selectedMonth, entries);
     await _loadMonthlyEntries();
   }
 
@@ -307,8 +249,8 @@ class _InputScreenState extends State<InputScreen> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('入力')),
-      body: Column(
+      body: SafeArea(
+        child: Column(
         children: [
           // モード切り替え
           Padding(
@@ -365,9 +307,9 @@ class _InputScreenState extends State<InputScreen> {
                           SegmentedButton<String>(
                             segments: const [
                               ButtonSegment(
-                                  value: 'expense', label: Text('支出')),
-                              ButtonSegment(
                                   value: 'income', label: Text('収入')),
+                              ButtonSegment(
+                                  value: 'expense', label: Text('支出')),
                             ],
                             selected: {_inputType},
                             onSelectionChanged: (s) =>
@@ -689,6 +631,7 @@ class _InputScreenState extends State<InputScreen> {
             ),
           ),
         ],
+        ),
       ),
     );
   }

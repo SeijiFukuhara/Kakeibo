@@ -1,6 +1,8 @@
 // lib/screens/category_settings_screen.dart
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../services/account_storage.dart';
+import '../services/firestore_service.dart';
 
 // ── トップレベルの設定メニュー ─────────────────────────────────────────
 class CategorySettingsScreen extends StatefulWidget {
@@ -13,6 +15,8 @@ class CategorySettingsScreen extends StatefulWidget {
 
 class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
   int _firstDayOfWeek = 0; // 0=日, 1=月, 6=土
+  List<SavedAccount> _savedAccounts = [];
+  String? _currentEmail;
 
   @override
   void initState() {
@@ -27,15 +31,17 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
+    final data = await FirestoreService.getSettings();
+    final accounts = await AccountStorage.loadAccounts();
     setState(() {
-      _firstDayOfWeek = prefs.getInt('first_day_of_week') ?? 0;
+      _firstDayOfWeek = (data['first_day_of_week'] as int?) ?? 0;
+      _savedAccounts = accounts;
+      _currentEmail = FirebaseAuth.instance.currentUser?.email;
     });
   }
 
   Future<void> _saveFirstDay(int day) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('first_day_of_week', day);
+    await FirestoreService.saveSettings({'first_day_of_week': day});
     setState(() => _firstDayOfWeek = day);
   }
 
@@ -48,6 +54,68 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
       default:
         return '日曜日';
     }
+  }
+
+  Future<void> _switchAccount(SavedAccount account) async {
+    try {
+      await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: account.email,
+        password: account.password,
+      );
+      await AccountStorage.saveAccount(account.email, account.password);
+      if (mounted) Navigator.of(context).pop(); // ボトムシートを閉じる
+    } on FirebaseAuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('切り替え失敗: ${e.message}')),
+        );
+      }
+    }
+  }
+
+  void _showAccountSwitcher() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'アカウントを切り替え',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            if (_currentEmail != null)
+              ListTile(
+                leading: const Icon(Icons.check_circle, color: Colors.green),
+                title: Text(_currentEmail!),
+                subtitle: const Text('現在のアカウント'),
+              ),
+            ..._savedAccounts
+                .where((a) => a.email != _currentEmail)
+                .map(
+                  (account) => ListTile(
+                    leading: const Icon(Icons.account_circle),
+                    title: Text(account.email),
+                    onTap: () => _switchAccount(account),
+                  ),
+                ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('ログアウト', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.of(ctx).pop();
+                await FirebaseAuth.instance.signOut();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showFirstDayDialog() {
@@ -100,8 +168,8 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('設定')),
-      body: ListView(
+      body: SafeArea(
+        child: ListView(
         children: [
           ListTile(
             leading: const Icon(Icons.category_outlined),
@@ -125,7 +193,16 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
             trailing: const Icon(Icons.chevron_right),
             onTap: _showFirstDayDialog,
           ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.switch_account_outlined),
+            title: const Text('アカウントを切り替え'),
+            subtitle: Text(_currentEmail ?? ''),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: _showAccountSwitcher,
+          ),
         ],
+        ),
       ),
     );
   }
@@ -174,23 +251,17 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
   }
 
   Future<void> _loadAll() async {
-    final prefs = await SharedPreferences.getInstance();
+    final data = await FirestoreService.getSettings();
     setState(() {
-      _dailyExpense =
-          prefs.getStringList(_keys[0]) ?? ['食費', '日用品', '交通費'];
-      _monthlyExpense =
-          prefs.getStringList(_keys[1]) ?? ['家賃', '光熱費', '通信費'];
-      _dailyIncome =
-          prefs.getStringList(_keys[2]) ?? ['給与', '副収入', 'その他'];
-      _monthlyIncome =
-          prefs.getStringList(_keys[3]) ?? ['給与', '副収入'];
+      _dailyExpense = List<String>.from(data[_keys[0]] ?? ['食費', '日用品', '交通費']);
+      _monthlyExpense = List<String>.from(data[_keys[1]] ?? ['家賃', '光熱費', '通信費']);
+      _dailyIncome = List<String>.from(data[_keys[2]] ?? ['給与', '副収入', 'その他']);
+      _monthlyIncome = List<String>.from(data[_keys[3]] ?? ['給与', '副収入']);
     });
   }
 
-
   Future<void> _save(String key, List<String> list) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(key, list);
+    await FirestoreService.saveSettings({key: list});
   }
 
   void _add(List<String> list, String key, TextEditingController ctrl) {
