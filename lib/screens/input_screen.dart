@@ -125,6 +125,10 @@ class _InputScreenState extends State<InputScreen> {
     _amountCtrl.clear();
     _commentCtrl.clear();
     await _loadDailyEntries();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('保存しました'), duration: Duration(seconds: 2)),
+    );
   }
 
   // ── 月ごと追加 ──────────────────────────────────────────────────────
@@ -146,6 +150,10 @@ class _InputScreenState extends State<InputScreen> {
     _commentCtrl.clear();
     setState(() => _monthlyDay = null);
     await _loadMonthlyEntries();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('保存しました'), duration: Duration(seconds: 2)),
+    );
   }
 
   // ── 日ごとエントリ削除 ──────────────────────────────────────────────
@@ -165,7 +173,7 @@ class _InputScreenState extends State<InputScreen> {
     await _loadMonthlyEntries();
   }
 
-  // ── 日ごとエントリ編集ダイアログ ────────────────────────────────────
+  // ── 日ごとエントリ編集ダイアログ（カレンダー画面と同仕様）──────────
   Future<void> _editDailyEntryDialog(int index, Map<String, String> e) async {
     String editType = e['type'] ?? 'expense';
     List<String> cats() =>
@@ -173,80 +181,140 @@ class _InputScreenState extends State<InputScreen> {
     String? selectedCat = cats().contains(e['title'])
         ? e['title']
         : (cats().isNotEmpty ? cats()[0] : null);
+    DateTime selectedDate = _selectedDate;
     final amountCtrl = TextEditingController(text: e['amount']);
     final commentCtrl = TextEditingController(text: e['comment'] ?? '');
 
     await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDs) => AlertDialog(
-          title: const Text('日ごと記録を編集'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'income', label: Text('収入')),
-                  ButtonSegment(value: 'expense', label: Text('支出')),
-                ],
-                selected: {editType},
-                onSelectionChanged: (s) => setDs(() {
-                  editType = s.first;
-                  selectedCat = cats().isNotEmpty ? cats()[0] : null;
-                }),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: amountCtrl,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                decoration: const InputDecoration(
-                    labelText: '金額', suffixText: '円', isDense: true),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                initialValue: selectedCat,
-                decoration:
-                    const InputDecoration(labelText: 'カテゴリ', isDense: true),
-                items: cats()
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (v) => setDs(() => selectedCat = v),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: commentCtrl,
-                decoration: const InputDecoration(
-                    labelText: 'メモ（任意）', isDense: true),
-              ),
-            ],
+        builder: (ctx, setDs) => Dialog(
+          child: Container(
+            width: 420,
+            constraints: const BoxConstraints(maxHeight: 520),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment(value: 'income', label: Text('収入')),
+                          ButtonSegment(value: 'expense', label: Text('支出')),
+                        ],
+                        selected: {editType},
+                        onSelectionChanged: (s) => setDs(() {
+                          editType = s.first;
+                          selectedCat = cats().isNotEmpty ? cats()[0] : null;
+                        }),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: amountCtrl,
+                        keyboardType: TextInputType.number,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                            labelText: '金額',
+                            hintText: '例：1000',
+                            floatingLabelBehavior: FloatingLabelBehavior.always,
+                            suffixText: '円',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedCat,
+                        decoration: const InputDecoration(
+                            labelText: 'カテゴリ',
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                        items: cats()
+                            .map((c) =>
+                                DropdownMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                        onChanged: (v) => setDs(() => selectedCat = v),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: commentCtrl,
+                        decoration: const InputDecoration(
+                            labelText: 'メモ（任意）',
+                            hintText: 'メモを入力',
+                            floatingLabelBehavior: FloatingLabelBehavior.always,
+                            border: OutlineInputBorder(),
+                            isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonHideUnderline(
+                        child: DropdownButton<DateTime>(
+                          value: selectedDate,
+                          isExpanded: true,
+                          items: List.generate(
+                            DateUtils.getDaysInMonth(
+                                selectedDate.year, selectedDate.month),
+                            (i) {
+                              final d = DateTime(selectedDate.year,
+                                  selectedDate.month, i + 1);
+                              const wds = ['月', '火', '水', '木', '金', '土', '日'];
+                              return DropdownMenuItem(
+                                value: d,
+                                child: Text(
+                                    '${d.month}月${d.day}日（${wds[d.weekday - 1]}）'),
+                              );
+                            },
+                          ),
+                          onChanged: (d) {
+                            if (d != null) setDs(() => selectedDate = d);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 8, 8, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('キャンセル'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () async {
+                          if (amountCtrl.text.isEmpty) return;
+                          final origEntries = await FirestoreService
+                              .getDailyEntries(_selectedDate);
+                          if (index < origEntries.length) {
+                            origEntries.removeAt(index);
+                          }
+                          await FirestoreService.setDailyEntries(
+                              _selectedDate, origEntries);
+                          final newEntries = await FirestoreService
+                              .getDailyEntries(selectedDate);
+                          newEntries.add({
+                            'title': selectedCat ?? '',
+                            'amount': amountCtrl.text,
+                            'type': editType,
+                            'comment': commentCtrl.text,
+                          });
+                          await FirestoreService.setDailyEntries(
+                              selectedDate, newEntries);
+                          await _loadDailyEntries();
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                        child: const Text('保存'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('キャンセル'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                if (amountCtrl.text.isEmpty) return;
-                final entries =
-                    await FirestoreService.getDailyEntries(_selectedDate);
-                if (index < entries.length) {
-                  entries[index] = {
-                    'title': selectedCat ?? entries[index]['title']!,
-                    'amount': amountCtrl.text,
-                    'type': editType,
-                    'comment': commentCtrl.text,
-                  };
-                  await FirestoreService.setDailyEntries(
-                      _selectedDate, entries);
-                  await _loadDailyEntries();
-                }
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('保存'),
-            ),
-          ],
         ),
       ),
     );
@@ -813,6 +881,8 @@ class _InputScreenState extends State<InputScreen> {
                                     keyboardType: TextInputType.number,
                                     decoration: const InputDecoration(
                                       labelText: '金額',
+                                      hintText: '例：1000',
+                                      floatingLabelBehavior: FloatingLabelBehavior.always,
                                       suffixText: '円',
                                       border: OutlineInputBorder(),
                                       isDense: true,
@@ -860,6 +930,8 @@ class _InputScreenState extends State<InputScreen> {
                                     controller: _commentCtrl,
                                     decoration: const InputDecoration(
                                       labelText: 'メモ（任意）',
+                                      hintText: 'メモを入力',
+                                      floatingLabelBehavior: FloatingLabelBehavior.always,
                                       border: OutlineInputBorder(),
                                       isDense: true,
                                     ),

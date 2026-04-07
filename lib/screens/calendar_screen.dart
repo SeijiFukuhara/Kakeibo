@@ -39,6 +39,9 @@ class CalendarScreenState extends State<CalendarScreen> {
   List<Map<String, String>> _monthIncomeEntries = [];
   List<Map<String, String>> _monthExpenseEntries = [];
 
+  // 定期支払い
+  List<Map<String, String>> _subscriptions = [];
+
 
   @override
   void initState() {
@@ -47,6 +50,7 @@ class CalendarScreenState extends State<CalendarScreen> {
     _loadMonthData(_selectedDay!);
     _loadMonthBudget(_selectedDay!);
     _loadCategories();
+    _loadSubscriptions();
   }
 
   // ── 月固定エントリのロード ──────────────────────────────────────────
@@ -57,6 +61,34 @@ class CalendarScreenState extends State<CalendarScreen> {
       _monthIncomeEntries = incomeEntries;
       _monthExpenseEntries = expenseEntries;
     });
+  }
+
+  // ── 定期支払いのロード ────────────────────────────────────────────
+  Future<void> _loadSubscriptions() async {
+    final subs = await FirestoreService.getSubscriptions();
+    setState(() => _subscriptions = subs);
+  }
+
+  bool _isSubApplicable(Map<String, String> s, DateTime month) {
+    final startStr = s['startYearMonth'] ?? '';
+    final endStr = s['endYearMonth'] ?? '';
+    if (startStr.isNotEmpty) {
+      final parts = startStr.split('-');
+      if (parts.length == 2) {
+        final startMonth = DateTime(
+            int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
+        if (month.isBefore(startMonth)) return false;
+      }
+    }
+    if (endStr.isNotEmpty) {
+      final parts = endStr.split('-');
+      if (parts.length == 2) {
+        final endMonth = DateTime(
+            int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
+        if (month.isAfter(endMonth)) return false;
+      }
+    }
+    return true;
   }
 
   // ── 月固定エントリの追加 ──────────────────────────────────────────
@@ -1034,8 +1066,15 @@ class CalendarScreenState extends State<CalendarScreen> {
         0, (sum, e) => sum + (int.tryParse(e['amount'] ?? '0') ?? 0));
     final expenseSum = expenseEvents.fold(
         0, (sum, e) => sum + (int.tryParse(e['amount'] ?? '0') ?? 0));
-    final totalIncome = monthIncomeSum + incomeSum;
-    final totalExpense = monthExpenseSum + expenseSum;
+    // 定期支払い合計（当月適用分）
+    final subIncomeSum = _subscriptions
+        .where((s) => s['type'] == 'income' && _isSubApplicable(s, _focusedDay))
+        .fold(0, (sum, s) => sum + (int.tryParse(s['amount'] ?? '0') ?? 0));
+    final subExpenseSum = _subscriptions
+        .where((s) => s['type'] == 'expense' && _isSubApplicable(s, _focusedDay))
+        .fold(0, (sum, s) => sum + (int.tryParse(s['amount'] ?? '0') ?? 0));
+    final totalIncome = monthIncomeSum + incomeSum + subIncomeSum;
+    final totalExpense = monthExpenseSum + expenseSum + subExpenseSum;
     final balance = totalIncome - totalExpense;
 
     // 日別合計マップ（キー: "year-month-day"）
@@ -1053,8 +1092,23 @@ class CalendarScreenState extends State<CalendarScreen> {
       }
     }
 
-    // 月固定エントリを先頭に追加した表示用リスト
+    // 当月に適用可能な定期支払い
+    final applicableSubs = _subscriptions
+        .where((s) => _isSubApplicable(s, _focusedDay))
+        .toList();
+
+    // 定期→月固定→日ごとの順に表示
     final incomeDisplayEvents = [
+      ...applicableSubs
+          .where((s) => s['type'] == 'income')
+          .map((s) => {
+                'title': s['title'] ?? '',
+                'amount': s['amount'] ?? '0',
+                'day': s['billingDay'] ?? '',
+                'comment': s['memo'] ?? '',
+                'type': 'income',
+                'date': '定期',
+              }),
       ...List.generate(
         _monthIncomeEntries.length,
         (i) => {
@@ -1071,6 +1125,16 @@ class CalendarScreenState extends State<CalendarScreen> {
       ...incomeEvents,
     ];
     final expenseDisplayEvents = [
+      ...applicableSubs
+          .where((s) => s['type'] == 'expense')
+          .map((s) => {
+                'title': s['title'] ?? '',
+                'amount': s['amount'] ?? '0',
+                'day': s['billingDay'] ?? '',
+                'comment': s['memo'] ?? '',
+                'type': 'expense',
+                'date': '定期',
+              }),
       ...List.generate(
         _monthExpenseEntries.length,
         (i) => {
