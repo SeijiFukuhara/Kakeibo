@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:intl/intl.dart';
@@ -1026,26 +1027,169 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  Widget _buildSummaryTile(String label, int amount, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+  Widget _buildSummaryTile(String label, int amount, Color color,
+      {VoidCallback? onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label, style: TextStyle(fontSize: 10, color: color)),
+                const SizedBox(width: 2),
+                Icon(Icons.pie_chart_outline, size: 10, color: color),
+              ],
+            ),
+            Text(
+              '¥${_formatAmount(amount)}',
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.bold, color: color),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label, style: TextStyle(fontSize: 10, color: color)),
-          Text(
-            '¥${_formatAmount(amount)}',
-            style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.bold, color: color),
-            overflow: TextOverflow.ellipsis,
+    );
+  }
+
+  // ── 円グラフダイアログ ────────────────────────────────────────────
+  void _showPieChartDialog({
+    required String title,
+    required List<Map<String, String>> entries,
+    required Color color,
+  }) {
+    // カテゴリ別に集計
+    final Map<String, int> categoryTotals = {};
+    for (final e in entries) {
+      final cat = e['title'] ?? '不明';
+      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+      categoryTotals[cat] = (categoryTotals[cat] ?? 0) + amount;
+    }
+    final total = categoryTotals.values.fold(0, (a, b) => a + b);
+    if (total == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('データがありません'), duration: Duration(seconds: 2)),
+      );
+      return;
+    }
+
+    // パレット
+    const palette = [
+      Color(0xFF4CAF50), Color(0xFF2196F3), Color(0xFFFF9800),
+      Color(0xFF9C27B0), Color(0xFFE91E63), Color(0xFF00BCD4),
+      Color(0xFFFF5722), Color(0xFF795548), Color(0xFF607D8B),
+      Color(0xFFFFC107),
+    ];
+    final sortedEntries = categoryTotals.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Container(
+          width: 380,
+          constraints: const BoxConstraints(maxHeight: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Row(
+                  children: [
+                    Text(title,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
+                    const Spacer(),
+                    Text('¥${_formatAmount(total)}',
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: color)),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      SizedBox(
+                        width: 200,
+                        height: 200,
+                        child: CustomPaint(
+                          painter: _PieChartPainter(
+                            data: sortedEntries
+                                .asMap()
+                                .entries
+                                .map((e) => _PieSlice(
+                                      value: e.value.value.toDouble(),
+                                      color: palette[e.key % palette.length],
+                                    ))
+                                .toList(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ...sortedEntries.asMap().entries.map((entry) {
+                        final idx = entry.key;
+                        final cat = entry.value.key;
+                        final amt = entry.value.value;
+                        final pct = (amt / total * 100).toStringAsFixed(1);
+                        final pieColor = palette[idx % palette.length];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 3),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 12,
+                                height: 12,
+                                decoration: BoxDecoration(
+                                  color: pieColor,
+                                  borderRadius: BorderRadius.circular(3),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(cat,
+                                    style: const TextStyle(fontSize: 13)),
+                              ),
+                              Text('$pct%',
+                                  style: TextStyle(
+                                      fontSize: 12, color: Colors.grey[600])),
+                              const SizedBox(width: 8),
+                              Text('¥${_formatAmount(amt)}',
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('閉じる',
+                    style: TextStyle(color: Colors.grey)),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1288,11 +1432,21 @@ class CalendarScreenState extends State<CalendarScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: _buildSummaryTile('収入', totalIncome, Colors.green),
+                  child: _buildSummaryTile('収入', totalIncome, Colors.green,
+                      onTap: () => _showPieChartDialog(
+                            title: '収入の内訳',
+                            entries: incomeDisplayEvents,
+                            color: Colors.green,
+                          )),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _buildSummaryTile('支出', totalExpense, Colors.red),
+                  child: _buildSummaryTile('支出', totalExpense, Colors.red,
+                      onTap: () => _showPieChartDialog(
+                            title: '支出の内訳',
+                            entries: expenseDisplayEvents,
+                            color: Colors.red,
+                          )),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -1300,6 +1454,16 @@ class CalendarScreenState extends State<CalendarScreen> {
                     '合計',
                     balance,
                     balance >= 0 ? Colors.blue : Colors.orange,
+                    onTap: () => _showPieChartDialog(
+                          title: '収支の内訳',
+                          entries: [
+                            ...incomeDisplayEvents
+                                .map((e) => {...e, 'title': '収入:${e['title']}'}),
+                            ...expenseDisplayEvents
+                                .map((e) => {...e, 'title': '支出:${e['title']}'}),
+                          ],
+                          color: balance >= 0 ? Colors.blue : Colors.orange,
+                        ),
                   ),
                 ),
               ],
@@ -1504,6 +1668,55 @@ class CalendarScreenState extends State<CalendarScreen> {
 
 }
 
+
+class _PieSlice {
+  final double value;
+  final Color color;
+  const _PieSlice({required this.value, required this.color});
+}
+
+class _PieChartPainter extends CustomPainter {
+  final List<_PieSlice> data;
+  const _PieChartPainter({required this.data});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final total = data.fold(0.0, (sum, s) => sum + s.value);
+    if (total == 0) return;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = math.min(size.width, size.height) / 2;
+    double startAngle = -math.pi / 2;
+    for (final slice in data) {
+      final sweep = 2 * math.pi * slice.value / total;
+      final paint = Paint()
+        ..color = slice.color
+        ..style = PaintingStyle.fill;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweep,
+        true,
+        paint,
+      );
+      // 区切り線
+      final divider = Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: radius),
+        startAngle,
+        sweep,
+        true,
+        divider,
+      );
+      startAngle += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(_PieChartPainter old) => old.data != data;
+}
 
 class _SubSectionHeader extends StatelessWidget {
   final String label;

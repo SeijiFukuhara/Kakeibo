@@ -801,31 +801,14 @@ class _InputScreenState extends State<InputScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // モード切り替え
+            // モード切り替え（カスタムタブバー）
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(
-                    value: 'daily',
-                    icon: Icon(Icons.today_outlined),
-                    label: Text('日'),
-                  ),
-                  ButtonSegment(
-                    value: 'monthly',
-                    icon: Icon(Icons.calendar_month_outlined),
-                    label: Text('月'),
-                  ),
-                  ButtonSegment(
-                    value: 'subscription',
-                    icon: Icon(Icons.repeat_outlined),
-                    label: Text('定期'),
-                  ),
-                ],
-                selected: {_mode},
-                onSelectionChanged: (s) async {
+              child: _ModeTabBar(
+                mode: _mode,
+                onChanged: (newMode) async {
                   setState(() {
-                    _mode = s.first;
+                    _mode = newMode;
                     _amountCtrl.clear();
                     _commentCtrl.clear();
                     _monthlyDay = null;
@@ -837,7 +820,7 @@ class _InputScreenState extends State<InputScreen> {
                         ? _currentMonthlyCats[0]
                         : null;
                   });
-                  if (s.first == 'subscription') await _loadSubscriptions();
+                  if (newMode == 'subscription') await _loadSubscriptions();
                 },
               ),
             ),
@@ -1444,6 +1427,89 @@ class _YearMonthPicker extends StatelessWidget {
               style: const TextStyle(fontSize: 10, color: Colors.grey)),
           Text(_displayText, style: const TextStyle(fontSize: 13)),
         ],
+      ),
+    );
+  }
+}
+
+// ── モード切り替えタブバー ─────────────────────────────────────────────────
+class _ModeTabBar extends StatelessWidget {
+  final String mode;
+  final Future<void> Function(String) onChanged;
+
+  const _ModeTabBar({required this.mode, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final tabs = [
+      (value: 'daily',        icon: Icons.today_outlined,           label: '日'),
+      (value: 'monthly',      icon: Icons.calendar_month_outlined,  label: '月'),
+      (value: 'subscription', icon: Icons.repeat_outlined,          label: '定期'),
+    ];
+
+    return Container(
+      height: 44,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      padding: const EdgeInsets.all(4),
+      child: Row(
+        children: tabs.map((tab) {
+          final selected = mode == tab.value;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onChanged(tab.value),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeInOut,
+                decoration: BoxDecoration(
+                  color: selected ? colorScheme.surface : Colors.transparent,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: selected
+                      ? [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 4,
+                            offset: const Offset(0, 1),
+                          )
+                        ]
+                      : [],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      tab.icon,
+                      size: 15,
+                      color: selected
+                          ? colorScheme.primary
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      tab.label,
+                      maxLines: 1,
+                      softWrap: false,
+                      overflow: TextOverflow.visible,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: selected
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }

@@ -46,9 +46,15 @@
   dart run flutter_launcher_icons
   ```
 
-### 5. バンドルIDの確認
-- `ios/Runner.xcodeproj/project.pbxproj` を開いてBUNDLE_IDENTIFIERを確認
-- App Store Connectで登録したバンドルIDと一致させる（例: `com.yourname.kakeibo`）
+### 5. バンドルIDの変更（必須）
+- 現在のバンドルIDは `com.example.kakeiboAppMvp2` で、これは審査で却下されます（`com.example` は使用不可）
+- MacBook上でXcodeを開いて変更するか、`project.pbxproj` をテキストエディタで一括置換：
+  ```
+  変更前: com.example.kakeiboAppMvp2
+  変更後: com.あなたのドメイン.kakeibo（例: com.seiji.kakeibo）
+  ```
+- App Store Connectで登録するバンドルIDと完全一致させること
+- Firebaseの `GoogleService-Info.plist` のBUNDLE_IDも同じ値に更新すること
 
 ### 6. Flutterコードの最終確認
 - `pubspec.yaml` のバージョン番号を設定（例: `version: 1.0.0+1`）
