@@ -451,6 +451,7 @@ class _InputScreenState extends State<InputScreen> {
             ? existing['title']
             : (cats().isNotEmpty ? cats()[0] : null))
         : (cats().isNotEmpty ? cats()[0] : null);
+    String cycle = isEdit ? (existing['cycle'] ?? 'monthly') : 'monthly';
     final amountCtrl =
         TextEditingController(text: isEdit ? (existing['amount'] ?? '') : '');
     final memoCtrl =
@@ -468,7 +469,7 @@ class _InputScreenState extends State<InputScreen> {
         builder: (ctx, setDs) => Dialog(
           child: Container(
             width: 400,
-            constraints: const BoxConstraints(maxHeight: 560),
+            constraints: const BoxConstraints(maxHeight: 680),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -502,16 +503,48 @@ class _InputScreenState extends State<InputScreen> {
                           }),
                         ),
                         const SizedBox(height: 10),
+                        SegmentedButton<String>(
+                          segments: const [
+                            ButtonSegment(
+                                value: 'monthly',
+                                icon: Icon(Icons.calendar_month, size: 15),
+                                label: Text('毎月')),
+                            ButtonSegment(
+                                value: 'yearly',
+                                icon: Icon(Icons.event_repeat, size: 15),
+                                label: Text('年単位')),
+                          ],
+                          selected: {cycle},
+                          onSelectionChanged: (s) => setDs(() {
+                            cycle = s.first;
+                            billingDay = null;
+                            startYM = '';
+                            endYM = '';
+                          }),
+                        ),
+                        const SizedBox(height: 10),
                         TextField(
                           controller: amountCtrl,
                           keyboardType: TextInputType.number,
                           autofocus: !isEdit,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                               labelText: '金額',
-                              suffixText: '円',
-                              border: OutlineInputBorder(),
+                              suffixText: cycle == 'yearly' ? '円/年' : '円/月',
+                              border: const OutlineInputBorder(),
                               isDense: true),
                         ),
+                        if (cycle == 'yearly')
+                          Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Builder(builder: (ctx) {
+                              final y = int.tryParse(amountCtrl.text) ?? 0;
+                              return Text(
+                                '月あたり約 ¥${(y / 12).round()} として計算されます',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.grey),
+                              );
+                            }),
+                          ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
                           initialValue: selectedCat,
@@ -527,20 +560,35 @@ class _InputScreenState extends State<InputScreen> {
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<int?>(
+                          key: ValueKey(cycle),
                           initialValue: billingDay,
-                          decoration: const InputDecoration(
-                              labelText: '引き落とし日（任意）',
-                              border: OutlineInputBorder(),
+                          decoration: InputDecoration(
+                              labelText: cycle == 'yearly'
+                                  ? '引き落とし月（任意）'
+                                  : '引き落とし日（任意）',
+                              border: const OutlineInputBorder(),
                               isDense: true),
-                          items: [
-                            const DropdownMenuItem(
-                                value: null, child: Text('指定なし')),
-                            ...List.generate(
-                              31,
-                              (i) => DropdownMenuItem(
-                                  value: i + 1, child: Text('毎月${i + 1}日')),
-                            ),
-                          ],
+                          items: cycle == 'yearly'
+                              ? [
+                                  const DropdownMenuItem(
+                                      value: null, child: Text('指定なし')),
+                                  ...List.generate(
+                                    12,
+                                    (i) => DropdownMenuItem(
+                                        value: i + 1,
+                                        child: Text('毎年${i + 1}月')),
+                                  ),
+                                ]
+                              : [
+                                  const DropdownMenuItem(
+                                      value: null, child: Text('指定なし')),
+                                  ...List.generate(
+                                    31,
+                                    (i) => DropdownMenuItem(
+                                        value: i + 1,
+                                        child: Text('毎月${i + 1}日')),
+                                  ),
+                                ],
                           onChanged: (v) => setDs(() => billingDay = v),
                         ),
                         const SizedBox(height: 10),
@@ -552,21 +600,27 @@ class _InputScreenState extends State<InputScreen> {
                               isDense: true),
                         ),
                         const SizedBox(height: 12),
-                        // 開始月・終了月
+                        // 開始・終了（月単位：年月 / 年単位：年のみ）
                         Row(
                           children: [
                             Expanded(
                               child: _YearMonthPicker(
-                                label: '開始月（任意）',
+                                label: cycle == 'yearly'
+                                    ? '開始年（任意）'
+                                    : '開始月（任意）',
                                 value: startYM,
+                                showMonth: cycle != 'yearly',
                                 onChanged: (v) => setDs(() => startYM = v),
                               ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: _YearMonthPicker(
-                                label: '終了月（任意）',
+                                label: cycle == 'yearly'
+                                    ? '終了年（任意）'
+                                    : '終了月（任意）',
                                 value: endYM,
+                                showMonth: cycle != 'yearly',
                                 onChanged: (v) => setDs(() => endYM = v),
                               ),
                             ),
@@ -591,12 +645,19 @@ class _InputScreenState extends State<InputScreen> {
                           if (amountCtrl.text.isEmpty || selectedCat == null) {
                             return;
                           }
+                          final now = DateTime.now();
+                          final effectiveStart = startYM.isNotEmpty
+                              ? startYM
+                              : (cycle == 'yearly'
+                                  ? '${now.year}'
+                                  : '${now.year}-${now.month}');
                           final newSub = {
                             'type': subType,
+                            'cycle': cycle,
                             'title': selectedCat!,
                             'amount': amountCtrl.text,
                             'billingDay': billingDay?.toString() ?? '',
-                            'startYearMonth': startYM,
+                            'startYearMonth': effectiveStart,
                             'endYearMonth': endYM,
                             'memo': memoCtrl.text,
                           };
@@ -667,11 +728,14 @@ class _InputScreenState extends State<InputScreen> {
     }
     for (final s in applicable) {
       final type = s['type'] ?? 'expense';
+      final isYearly = s['cycle'] == 'yearly';
+      final rawAmount = int.tryParse(s['amount'] ?? '0') ?? 0;
+      final amount = isYearly ? (rawAmount / 12).round() : rawAmount;
       final entries =
           await FirestoreService.getMonthlyEntries(type, _selectedMonth);
       entries.add({
         'title': s['title'] ?? '',
-        'amount': s['amount'] ?? '0',
+        'amount': '$amount',
         'day': s['billingDay'] ?? '',
         'comment': s['memo'] ?? '',
       });
@@ -687,20 +751,35 @@ class _InputScreenState extends State<InputScreen> {
   bool _isSubApplicable(Map<String, String> s, DateTime month) {
     final startStr = s['startYearMonth'] ?? '';
     final endStr = s['endYearMonth'] ?? '';
-    if (startStr.isNotEmpty) {
-      final parts = startStr.split('-');
-      if (parts.length == 2) {
-        final startMonth = DateTime(
-            int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
-        if (month.isBefore(startMonth)) return false;
+    final isYearly = s['cycle'] == 'yearly';
+
+    if (isYearly) {
+      // 年単位：'YYYY' 形式（後方互換で 'YYYY-M' も許容）
+      if (startStr.isNotEmpty) {
+        final startYear = int.tryParse(startStr.split('-')[0]) ?? 0;
+        if (month.year < startYear) return false;
       }
-    }
-    if (endStr.isNotEmpty) {
-      final parts = endStr.split('-');
-      if (parts.length == 2) {
-        final endMonth = DateTime(
-            int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
-        if (month.isAfter(endMonth)) return false;
+      if (endStr.isNotEmpty) {
+        final endYear = int.tryParse(endStr.split('-')[0]) ?? 0;
+        if (month.year > endYear) return false;
+      }
+    } else {
+      // 月単位：'YYYY-M' 形式
+      if (startStr.isNotEmpty) {
+        final parts = startStr.split('-');
+        if (parts.length == 2) {
+          final startMonth = DateTime(
+              int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
+          if (month.isBefore(startMonth)) return false;
+        }
+      }
+      if (endStr.isNotEmpty) {
+        final parts = endStr.split('-');
+        if (parts.length == 2) {
+          final endMonth = DateTime(
+              int.tryParse(parts[0]) ?? 0, int.tryParse(parts[1]) ?? 0);
+          if (month.isAfter(endMonth)) return false;
+        }
       }
     }
     return true;
@@ -1252,15 +1331,14 @@ class _InputScreenState extends State<InputScreen> {
                   itemBuilder: (_, i) {
                     final s = _subscriptions[i];
                     final isIncome = s['type'] == 'income';
+                    final isYearly = s['cycle'] == 'yearly';
                     final color = isIncome ? Colors.green : Colors.red;
                     final day = s['billingDay'] ?? '';
                     final memo = s['memo'] ?? '';
                     final startYM = s['startYearMonth'] ?? '';
                     final endYM = s['endYearMonth'] ?? '';
-                    final periodParts = [
-                      if (startYM.isNotEmpty) '$startYM〜',
-                      if (endYM.isNotEmpty) '〜$endYM',
-                    ];
+                    final amount = int.tryParse(s['amount'] ?? '0') ?? 0;
+                    final monthlyAmount = isYearly ? (amount / 12).round() : amount;
 
                     return Card(
                       margin: const EdgeInsets.symmetric(
@@ -1280,8 +1358,26 @@ class _InputScreenState extends State<InputScreen> {
                               ),
                               child: Text(
                                 isIncome ? '収入' : '支出',
-                                style:
-                                    TextStyle(color: color, fontSize: 11),
+                                style: TextStyle(color: color, fontSize: 11),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: isYearly
+                                    ? Colors.orange.withValues(alpha: 0.15)
+                                    : Colors.blue.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                isYearly ? '年払' : '毎月',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: isYearly
+                                        ? Colors.orange.shade700
+                                        : Colors.blue),
                               ),
                             ),
                           ],
@@ -1289,25 +1385,42 @@ class _InputScreenState extends State<InputScreen> {
                         title: Text(s['title'] ?? ''),
                         subtitle: Text(
                           [
-                            if (day.isNotEmpty) '毎月$day日',
+                            if (day.isNotEmpty)
+                              isYearly ? '毎年$day月' : '毎月$day日',
                             if (memo.isNotEmpty) memo,
                             if (startYM.isNotEmpty || endYM.isNotEmpty)
-                              periodParts.join(''),
+                              [
+                                if (startYM.isNotEmpty) '$startYM〜',
+                                if (endYM.isNotEmpty) '〜$endYM',
+                              ].join(''),
                           ].join('　'),
                           style: const TextStyle(fontSize: 11),
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              '¥${_formatAmount(int.tryParse(s['amount'] ?? '0') ?? 0)}',
-                              style: TextStyle(
-                                  color: color,
-                                  fontWeight: FontWeight.bold),
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '¥${_formatAmount(monthlyAmount)}/月',
+                                  style: TextStyle(
+                                      color: color,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13),
+                                ),
+                                if (isYearly)
+                                  Text(
+                                    '年額 ¥${_formatAmount(amount)}',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.grey.shade600),
+                                  ),
+                              ],
                             ),
                             IconButton(
-                              icon:
-                                  const Icon(Icons.delete_outline, size: 18),
+                              icon: const Icon(Icons.delete_outline, size: 18),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
                                   minWidth: 32, minHeight: 32),
@@ -1326,108 +1439,153 @@ class _InputScreenState extends State<InputScreen> {
 }
 
 // ── 年月ピッカー小ウィジェット ───────────────────────────────────────────
-class _YearMonthPicker extends StatelessWidget {
+class _YearMonthPicker extends StatefulWidget {
   final String label;
-  final String value; // 'YYYY-M' or ''
+  final String value; // 'YYYY-M' or 'YYYY' (year-only) or ''
   final void Function(String) onChanged;
+  final bool showMonth; // false のとき年のみ表示（年単位サブスク用）
 
   const _YearMonthPicker({
     required this.label,
     required this.value,
     required this.onChanged,
+    this.showMonth = true,
   });
 
-  String get _displayText {
-    if (value.isEmpty) return '未設定';
-    final parts = value.split('-');
-    if (parts.length != 2) return '未設定';
-    return '${parts[0]}年${parts[1]}月';
+  @override
+  State<_YearMonthPicker> createState() => _YearMonthPickerState();
+}
+
+class _YearMonthPickerState extends State<_YearMonthPicker> {
+  int? _year;
+  int? _month;
+
+  @override
+  void initState() {
+    super.initState();
+    _parse(widget.value);
   }
 
-  Future<void> _pick(BuildContext context) async {
-    final parts = value.split('-');
-    int tempYear = (parts.length == 2 ? int.tryParse(parts[0]) : null) ??
-        DateTime.now().year;
-    int tempMonth = (parts.length == 2 ? int.tryParse(parts[1]) : null) ??
-        DateTime.now().month;
+  @override
+  void didUpdateWidget(_YearMonthPicker old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value) _parse(widget.value);
+  }
 
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDs) => AlertDialog(
-          content: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              DropdownButton<int>(
-                value: tempYear,
-                items: List.generate(
-                  15,
-                  (i) => DropdownMenuItem(
-                    value: DateTime.now().year - 4 + i,
-                    child: Text('${DateTime.now().year - 4 + i}年'),
-                  ),
-                ),
-                onChanged: (v) {
-                  if (v != null) setDs(() => tempYear = v);
-                },
-              ),
-              const SizedBox(width: 8),
-              DropdownButton<int>(
-                value: tempMonth,
-                items: List.generate(
-                  12,
-                  (i) => DropdownMenuItem(
-                    value: i + 1,
-                    child: Text('${i + 1}月'),
-                  ),
-                ),
-                onChanged: (v) {
-                  if (v != null) setDs(() => tempMonth = v);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                onChanged('');
-                Navigator.pop(ctx);
-              },
-              child: const Text('クリア'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('キャンセル'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                onChanged('$tempYear-$tempMonth');
-                Navigator.pop(ctx);
-              },
-              child: const Text('決定'),
-            ),
-          ],
-        ),
-      ),
-    );
+  void _parse(String v) {
+    if (v.isEmpty) {
+      _year = null;
+      _month = null;
+    } else {
+      final parts = v.split('-');
+      _year = int.tryParse(parts[0]);
+      _month = parts.length > 1 ? int.tryParse(parts[1]) : null;
+    }
+  }
+
+  void _notify() {
+    if (!widget.showMonth) {
+      // 年のみモード
+      widget.onChanged(_year != null ? '$_year' : '');
+    } else {
+      if (_year != null && _month != null) {
+        widget.onChanged('$_year-$_month');
+      } else {
+        widget.onChanged('');
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: () => _pick(context),
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label,
-              style: const TextStyle(fontSize: 10, color: Colors.grey)),
-          Text(_displayText, style: const TextStyle(fontSize: 13)),
-        ],
-      ),
+    final now = DateTime.now();
+    final isSet = _year != null || _month != null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Text(widget.label,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            if (isSet) ...[
+              const Spacer(),
+              GestureDetector(
+                onTap: () {
+                  setState(() { _year = null; _month = null; });
+                  widget.onChanged('');
+                },
+                child: const Text('クリア',
+                    style: TextStyle(fontSize: 11, color: Colors.blue)),
+              ),
+            ],
+          ],
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: '年',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int?>(
+                    value: _year,
+                    isDense: true,
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('---')),
+                      ...List.generate(11, (i) {
+                        final y = now.year - 1 + i;
+                        return DropdownMenuItem(value: y, child: Text('$y年'));
+                      }),
+                    ],
+                    onChanged: (v) {
+                      setState(() => _year = v);
+                      _notify();
+                    },
+                  ),
+                ),
+              ),
+            ),
+            if (widget.showMonth) ...[
+              const SizedBox(width: 6),
+              Expanded(
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: '月',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int?>(
+                      value: _month,
+                      isDense: true,
+                      items: [
+                        const DropdownMenuItem(value: null, child: Text('---')),
+                        ...List.generate(
+                            12,
+                            (i) => DropdownMenuItem(
+                                value: i + 1, child: Text('${i + 1}月'))),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _month = v);
+                        _notify();
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
     );
   }
 }

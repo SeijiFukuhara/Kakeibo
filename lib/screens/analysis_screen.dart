@@ -58,6 +58,8 @@ class AnalysisScreenState extends State<AnalysisScreen>
   Map<String, int> _incomeByCategory = {};
   int _totalIncome = 0;
   int _totalExpense = 0;
+  List<Map<String, String>> _incomeEntryList = [];
+  List<Map<String, String>> _expenseEntryList = [];
 
   // 年ごと
   int _year = DateTime.now().year;
@@ -93,6 +95,8 @@ class AnalysisScreenState extends State<AnalysisScreen>
     _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
     final expMap = <String, int>{};
     final incMap = <String, int>{};
+    final incList = <Map<String, String>>[];
+    final expList = <Map<String, String>>[];
     int totalInc = 0;
     int totalExp = 0;
 
@@ -114,9 +118,15 @@ class AnalysisScreenState extends State<AnalysisScreen>
         if (e['type'] == 'income') {
           incMap[category] = (incMap[category] ?? 0) + amount;
           totalInc += amount;
+          incList.add({'title': category, 'amount': '$amount',
+              'type': 'income', 'comment': e['comment'] ?? '',
+              'date': '$month/$day'});
         } else {
           expMap[category] = (expMap[category] ?? 0) + amount;
           totalExp += amount;
+          expList.add({'title': category, 'amount': '$amount',
+              'type': 'expense', 'comment': e['comment'] ?? '',
+              'date': '$month/$day'});
         }
       }
     }
@@ -128,12 +138,20 @@ class AnalysisScreenState extends State<AnalysisScreen>
       final category = e['title'] ?? '収入';
       incMap[category] = (incMap[category] ?? 0) + amount;
       totalInc += amount;
+      final d = e['day'] ?? '';
+      incList.add({'title': category, 'amount': '$amount', 'type': 'income',
+          'comment': e['comment'] ?? '',
+          'date': d.isNotEmpty ? '$d日' : '月固定'});
     }
     for (final e in expenseEntries) {
       final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
       final category = e['title'] ?? '支出';
       expMap[category] = (expMap[category] ?? 0) + amount;
       totalExp += amount;
+      final d = e['day'] ?? '';
+      expList.add({'title': category, 'amount': '$amount', 'type': 'expense',
+          'comment': e['comment'] ?? '',
+          'date': d.isNotEmpty ? '$d日' : '月固定'});
     }
 
     if (!mounted) return;
@@ -142,6 +160,10 @@ class AnalysisScreenState extends State<AnalysisScreen>
       _incomeByCategory = incMap;
       _totalIncome = totalInc;
       _totalExpense = totalExp;
+      _incomeEntryList = incList
+        ..sort((a, b) => (a['date'] ?? '').compareTo(b['date'] ?? ''));
+      _expenseEntryList = expList
+        ..sort((a, b) => (a['date'] ?? '').compareTo(b['date'] ?? ''));
     });
   }
 
@@ -292,6 +314,10 @@ class AnalysisScreenState extends State<AnalysisScreen>
         if (_incomeByCategory.isNotEmpty)
           _buildPieSection('収入内訳', _incomeByCategory, _totalIncome,
               Colors.green.shade300),
+        if (_incomeEntryList.isNotEmpty || _expenseEntryList.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _buildEntriesSection(),
+        ],
         if (!hasData)
           const Center(
             child: Padding(
@@ -301,6 +327,81 @@ class AnalysisScreenState extends State<AnalysisScreen>
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildEntriesSection() {
+    Widget subHeader(String label, String total, Color color) => Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 4),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: color)),
+              Text('合計 ¥$total',
+                  style: TextStyle(fontSize: 12, color: color)),
+            ],
+          ),
+        );
+
+    return _sectionCard(
+      title: '明細',
+      children: [
+        if (_incomeEntryList.isNotEmpty) ...[
+          subHeader('収入', _formatAmount(_totalIncome), Colors.green),
+          const Divider(height: 8),
+          ..._incomeEntryList.map((e) => _buildEntryRow(e, Colors.green)),
+        ],
+        if (_expenseEntryList.isNotEmpty) ...[
+          if (_incomeEntryList.isNotEmpty) const SizedBox(height: 12),
+          subHeader('支出', _formatAmount(_totalExpense), Colors.red),
+          const Divider(height: 8),
+          ..._expenseEntryList.map((e) => _buildEntryRow(e, Colors.red)),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildEntryRow(Map<String, String> e, Color color) {
+    final comment = e['comment'] ?? '';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(e['date'] ?? '',
+                style: TextStyle(fontSize: 11, color: color)),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(e['title'] ?? '',
+                    style: const TextStyle(fontSize: 13)),
+                if (comment.isNotEmpty)
+                  Text(comment,
+                      style: const TextStyle(
+                          fontSize: 11, color: Colors.grey)),
+              ],
+            ),
+          ),
+          Text(
+            '¥${_formatAmount(int.tryParse(e['amount'] ?? '0') ?? 0)}',
+            style: TextStyle(
+                fontWeight: FontWeight.bold, color: color),
+          ),
+        ],
+      ),
     );
   }
 

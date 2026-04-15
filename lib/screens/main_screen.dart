@@ -50,6 +50,10 @@ class _MainScreenState extends State<MainScreen> {
             _calendarKey.currentState?.reloadSettings();
           }
           setState(() => _currentIndex = index);
+          // カレンダータブに切り替えたとき常に最新データを再取得
+          if (index == 1) {
+            _calendarKey.currentState?.reloadData();
+          }
           if (index == 2) {
             _analysisKey.currentState?.reload();
           }
