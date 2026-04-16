@@ -387,13 +387,21 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Colors.black54,
-            ),
+          child: Row(
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black54,
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(Icons.swap_vert, size: 14, color: Colors.black38),
+              const Text('ドラッグで並び替え',
+                  style: TextStyle(fontSize: 11, color: Colors.black38)),
+            ],
           ),
         ),
         if (list.isEmpty)
@@ -403,17 +411,29 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
                 style: TextStyle(color: Colors.grey, fontSize: 13)),
           )
         else
-          ...list.asMap().entries.map(
-                (entry) => ListTile(
-                  dense: true,
-                  title: Text(entry.value),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    onPressed: () => _delete(list, key, entry.key),
-                  ),
-                  onTap: () => _rename(list, key, entry.key),
-                ),
+          ReorderableListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: list.length,
+            onReorder: (oldIndex, newIndex) {
+              setState(() {
+                if (newIndex > oldIndex) newIndex--;
+                final item = list.removeAt(oldIndex);
+                list.insert(newIndex, item);
+              });
+              _save(key, list);
+            },
+            itemBuilder: (_, index) => ListTile(
+              key: ValueKey('$key-$index-${list[index]}'),
+              dense: true,
+              title: Text(list[index]),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: () => _delete(list, key, index),
               ),
+              onTap: () => _rename(list, key, index),
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
           child: Row(

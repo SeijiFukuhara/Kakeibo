@@ -50,8 +50,8 @@ class CalendarScreenState extends State<CalendarScreen> {
   // 定期支払い
   List<Map<String, String>> _subscriptions = [];
 
-  // カテゴリフィルター（null = 未選択）
-  String? _filterCategory;
+  // カテゴリフィルター（複数選択）
+  Set<String> _filterCategories = {};
 
 
   @override
@@ -1091,77 +1091,105 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
-  // ── カテゴリフィルターダイアログ ──────────────────────────────────
+  // ── カテゴリフィルターダイアログ（複数選択）────────────────────────
   void _showCategoryFilterDialog() {
     final allCategories = [
       ...{..._expenseCategories, ..._incomeCategories}
     ]..sort();
 
+    // ダイアログ内で一時的な選択状態を管理
+    final tempSelected = Set<String>.from(_filterCategories);
+
     showDialog(
       context: context,
-      builder: (ctx) => Dialog(
-        child: Container(
-          width: 360,
-          constraints: const BoxConstraints(maxHeight: 480),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.filter_list, size: 18),
-                    const SizedBox(width: 8),
-                    const Text('項目を選択',
-                        style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold)),
-                    const Spacer(),
-                    if (_filterCategory != null)
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDs) => Dialog(
+          child: Container(
+            width: 360,
+            constraints: const BoxConstraints(maxHeight: 480),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.filter_list, size: 18),
+                      const SizedBox(width: 8),
+                      const Text('項目を選択（複数可）',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      if (tempSelected.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            setDs(() => tempSelected.clear());
+                          },
+                          child: const Text('クリア',
+                              style: TextStyle(color: Colors.grey)),
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: allCategories.length,
+                    itemBuilder: (_, i) {
+                      final cat = allCategories[i];
+                      final isSelected = tempSelected.contains(cat);
+                      return ListTile(
+                        dense: true,
+                        title: Text(cat),
+                        leading: Checkbox(
+                          value: isSelected,
+                          onChanged: (_) => setDs(() {
+                            if (isSelected) {
+                              tempSelected.remove(cat);
+                            } else {
+                              tempSelected.add(cat);
+                            }
+                          }),
+                        ),
+                        tileColor: isSelected
+                            ? Colors.indigo.withValues(alpha: 0.08)
+                            : null,
+                        onTap: () => setDs(() {
+                          if (isSelected) {
+                            tempSelected.remove(cat);
+                          } else {
+                            tempSelected.add(cat);
+                          }
+                        }),
+                      );
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
                       TextButton(
-                        onPressed: () {
-                          setState(() => _filterCategory = null);
-                          Navigator.pop(ctx);
-                        },
-                        child: const Text('クリア',
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('キャンセル',
                             style: TextStyle(color: Colors.grey)),
                       ),
-                  ],
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() => _filterCategories = Set.from(tempSelected));
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text('適用'),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const Divider(height: 1),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: allCategories.length,
-                  itemBuilder: (_, i) {
-                    final cat = allCategories[i];
-                    final isSelected = _filterCategory == cat;
-                    return ListTile(
-                      dense: true,
-                      title: Text(cat),
-                      trailing: isSelected
-                          ? const Icon(Icons.check, color: Colors.indigo)
-                          : null,
-                      tileColor: isSelected
-                          ? Colors.indigo.withValues(alpha: 0.08)
-                          : null,
-                      onTap: () {
-                        setState(() =>
-                            _filterCategory = isSelected ? null : cat);
-                        Navigator.pop(ctx);
-                      },
-                    );
-                  },
-                ),
-              ),
-              const Divider(height: 1),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('キャンセル',
-                    style: TextStyle(color: Colors.grey)),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1817,11 +1845,11 @@ class CalendarScreenState extends State<CalendarScreen> {
       }
     }
 
-    // カテゴリフィルター一致日セット
+    // カテゴリフィルター一致日セット（複数選択対応）
     final filteredDays = <String>{};
-    if (_filterCategory != null) {
+    if (_filterCategories.isNotEmpty) {
       for (final e in _monthlyEvents) {
-        if (e['title'] == _filterCategory) {
+        if (_filterCategories.contains(e['title'])) {
           filteredDays.add(e['storageKey']!);
         }
       }
@@ -2056,21 +2084,23 @@ class CalendarScreenState extends State<CalendarScreen> {
                     onPressed: _showCategoryFilterDialog,
                     icon: Icon(Icons.filter_list,
                         size: 16,
-                        color: _filterCategory != null
+                        color: _filterCategories.isNotEmpty
                             ? Colors.white
                             : Colors.indigo),
                     label: Text(
-                      _filterCategory != null ? _filterCategory! : 'フィルター',
+                      _filterCategories.isEmpty
+                          ? 'フィルター'
+                          : '${_filterCategories.length}件選択',
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: _filterCategory != null
+                        color: _filterCategories.isNotEmpty
                             ? Colors.white
                             : Colors.indigo,
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 9),
-                      backgroundColor: _filterCategory != null
+                      backgroundColor: _filterCategories.isNotEmpty
                           ? Colors.indigo
                           : Colors.indigo.withValues(alpha: 0.06),
                       side: const BorderSide(color: Colors.indigo),
