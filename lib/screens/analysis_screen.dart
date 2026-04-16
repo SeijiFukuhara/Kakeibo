@@ -25,9 +25,8 @@ class AnalysisScreen extends StatefulWidget {
 }
 
 class AnalysisScreenState extends State<AnalysisScreen>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  late TabController _monthInnerTabController;
 
   // 月の開始日
   int _monthStartDay = 1;
@@ -59,17 +58,6 @@ class AnalysisScreenState extends State<AnalysisScreen>
   int _totalIncome = 0;
   int _totalExpense = 0;
 
-  // 明細: 日々の収支
-  List<Map<String, String>> _dailyIncomeList = [];
-  List<Map<String, String>> _dailyExpenseList = [];
-
-  // 明細: 月ごとの収支（月固定費）
-  List<Map<String, String>> _fixedIncomeList = [];
-  List<Map<String, String>> _fixedExpenseList = [];
-
-  // 明細: サブスク（当月適用分）
-  List<Map<String, String>> _monthSubList = [];
-
   // 年ごと
   int _year = DateTime.now().year;
   List<Map<String, int>> _monthlyData =
@@ -89,7 +77,6 @@ class AnalysisScreenState extends State<AnalysisScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _monthInnerTabController = TabController(length: 2, vsync: this);
     _loadMonthlyData();
     _loadYearlyData();
   }
@@ -97,16 +84,89 @@ class AnalysisScreenState extends State<AnalysisScreen>
   @override
   void dispose() {
     _tabController.dispose();
-    _monthInnerTabController.dispose();
     super.dispose();
   }
 
-  // サブスクが指定月に適用可能か判定
+  Future<void> _loadMonthlyData() async {
+    final settings = await FirestoreService.getSettings();
+    _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
+    final expMap = <String, int>{};
+    final incMap = <String, int>{};
+    int totalInc = 0;
+    int totalExp = 0;
+
+    final allDaily = await FirestoreService.getAllDailyEntries();
+    for (final entry in allDaily.entries) {
+      final parts = entry.key.split('-');
+      if (parts.length != 3) continue;
+      final year = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final day = int.tryParse(parts[2]);
+      if (year == null || month == null || day == null) continue;
+
+      final (lYear, lMonth) = _logicalYearMonth(DateTime(year, month, day));
+      if (lYear != _month.year || lMonth != _month.month) continue;
+
+      for (final e in entry.value) {
+        final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+        final category = e['title'] ?? '不明';
+        if (e['type'] == 'income') {
+          incMap[category] = (incMap[category] ?? 0) + amount;
+          totalInc += amount;
+        } else {
+          expMap[category] = (expMap[category] ?? 0) + amount;
+          totalExp += amount;
+        }
+      }
+    }
+
+    final incomeEntries =
+        await FirestoreService.getMonthlyEntries('income', _month);
+    final expenseEntries =
+        await FirestoreService.getMonthlyEntries('expense', _month);
+    for (final e in incomeEntries) {
+      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+      final category = e['title'] ?? '収入';
+      incMap[category] = (incMap[category] ?? 0) + amount;
+      totalInc += amount;
+    }
+    for (final e in expenseEntries) {
+      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
+      final category = e['title'] ?? '支出';
+      expMap[category] = (expMap[category] ?? 0) + amount;
+      totalExp += amount;
+    }
+
+    // サブスク（当月適用分）
+    final allSubs = await FirestoreService.getSubscriptions();
+    for (final s in allSubs) {
+      if (!_isSubApplicable(s, _month)) continue;
+      final isYearly = s['cycle'] == 'yearly';
+      final raw = int.tryParse(s['amount'] ?? '0') ?? 0;
+      final monthlyAmt = isYearly ? (raw / 12).round() : raw;
+      final category = s['title'] ?? '';
+      if (s['type'] == 'income') {
+        incMap[category] = (incMap[category] ?? 0) + monthlyAmt;
+        totalInc += monthlyAmt;
+      } else {
+        expMap[category] = (expMap[category] ?? 0) + monthlyAmt;
+        totalExp += monthlyAmt;
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _expenseByCategory = expMap;
+      _incomeByCategory = incMap;
+      _totalIncome = totalInc;
+      _totalExpense = totalExp;
+    });
+  }
+
   bool _isSubApplicable(Map<String, String> s, DateTime month) {
     final startStr = s['startYearMonth'] ?? '';
     final endStr = s['endYearMonth'] ?? '';
     final isYearly = s['cycle'] == 'yearly';
-
     if (isYearly) {
       if (startStr.isNotEmpty) {
         final startYear = int.tryParse(startStr.split('-')[0]) ?? 0;
@@ -135,139 +195,6 @@ class AnalysisScreenState extends State<AnalysisScreen>
       }
     }
     return true;
-  }
-
-  Future<void> _loadMonthlyData() async {
-    final settings = await FirestoreService.getSettings();
-    _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
-    final expMap = <String, int>{};
-    final incMap = <String, int>{};
-    final dailyIncList = <Map<String, String>>[];
-    final dailyExpList = <Map<String, String>>[];
-    int totalInc = 0;
-    int totalExp = 0;
-
-    // ── 日々の収支 ────────────────────────────────
-    final allDaily = await FirestoreService.getAllDailyEntries();
-    for (final entry in allDaily.entries) {
-      final parts = entry.key.split('-');
-      if (parts.length != 3) continue;
-      final year = int.tryParse(parts[0]);
-      final month = int.tryParse(parts[1]);
-      final day = int.tryParse(parts[2]);
-      if (year == null || month == null || day == null) continue;
-
-      final (lYear, lMonth) = _logicalYearMonth(DateTime(year, month, day));
-      if (lYear != _month.year || lMonth != _month.month) continue;
-
-      for (final e in entry.value) {
-        final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
-        final category = e['title'] ?? '不明';
-        if (e['type'] == 'income') {
-          incMap[category] = (incMap[category] ?? 0) + amount;
-          totalInc += amount;
-          dailyIncList.add({
-            'title': category,
-            'amount': '$amount',
-            'type': 'income',
-            'comment': e['comment'] ?? '',
-            'date': '$month/$day',
-          });
-        } else {
-          expMap[category] = (expMap[category] ?? 0) + amount;
-          totalExp += amount;
-          dailyExpList.add({
-            'title': category,
-            'amount': '$amount',
-            'type': 'expense',
-            'comment': e['comment'] ?? '',
-            'date': '$month/$day',
-          });
-        }
-      }
-    }
-
-    // ── 月ごとの収支（固定費）────────────────────
-    final incomeEntries =
-        await FirestoreService.getMonthlyEntries('income', _month);
-    final expenseEntries =
-        await FirestoreService.getMonthlyEntries('expense', _month);
-    final fixedIncList = <Map<String, String>>[];
-    final fixedExpList = <Map<String, String>>[];
-
-    for (final e in incomeEntries) {
-      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
-      final category = e['title'] ?? '収入';
-      incMap[category] = (incMap[category] ?? 0) + amount;
-      totalInc += amount;
-      final d = e['day'] ?? '';
-      fixedIncList.add({
-        'title': category,
-        'amount': '$amount',
-        'type': 'income',
-        'comment': e['comment'] ?? '',
-        'date': d.isNotEmpty ? '$d日' : '月固定',
-      });
-    }
-    for (final e in expenseEntries) {
-      final amount = int.tryParse(e['amount'] ?? '0') ?? 0;
-      final category = e['title'] ?? '支出';
-      expMap[category] = (expMap[category] ?? 0) + amount;
-      totalExp += amount;
-      final d = e['day'] ?? '';
-      fixedExpList.add({
-        'title': category,
-        'amount': '$amount',
-        'type': 'expense',
-        'comment': e['comment'] ?? '',
-        'date': d.isNotEmpty ? '$d日' : '月固定',
-      });
-    }
-
-    // ── サブスク（当月適用分）──────────────────────
-    final allSubs = await FirestoreService.getSubscriptions();
-    final monthSubList = allSubs
-        .where((s) => _isSubApplicable(s, _month))
-        .map((s) {
-          final isYearly = s['cycle'] == 'yearly';
-          final raw = int.tryParse(s['amount'] ?? '0') ?? 0;
-          final monthlyAmt = isYearly ? (raw / 12).round() : raw;
-          final isIncome = s['type'] == 'income';
-          if (isIncome) {
-            incMap[s['title'] ?? ''] =
-                (incMap[s['title'] ?? ''] ?? 0) + monthlyAmt;
-            totalInc += monthlyAmt;
-          } else {
-            expMap[s['title'] ?? ''] =
-                (expMap[s['title'] ?? ''] ?? 0) + monthlyAmt;
-            totalExp += monthlyAmt;
-          }
-          return {
-            'title': s['title'] ?? '',
-            'amount': '$monthlyAmt',
-            'type': s['type'] ?? 'expense',
-            'comment': s['memo'] ?? '',
-            'date': isYearly ? '年払' : '定期',
-            'cycle': s['cycle'] ?? 'monthly',
-            'billingDay': s['billingDay'] ?? '',
-          };
-        })
-        .toList();
-
-    if (!mounted) return;
-    setState(() {
-      _expenseByCategory = expMap;
-      _incomeByCategory = incMap;
-      _totalIncome = totalInc;
-      _totalExpense = totalExp;
-      _dailyIncomeList = dailyIncList
-        ..sort((a, b) => (a['date'] ?? '').compareTo(b['date'] ?? ''));
-      _dailyExpenseList = dailyExpList
-        ..sort((a, b) => (a['date'] ?? '').compareTo(b['date'] ?? ''));
-      _fixedIncomeList = fixedIncList;
-      _fixedExpenseList = fixedExpList;
-      _monthSubList = monthSubList;
-    });
   }
 
   Future<void> _loadYearlyData() async {
@@ -393,64 +320,20 @@ class AnalysisScreenState extends State<AnalysisScreen>
 
   Widget _buildMonthlyView() {
     final balance = _totalIncome - _totalExpense;
-
-    return Column(
-      children: [
-        // 月セレクター + サマリー
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Column(
-            children: [
-              _buildMonthSelector(),
-              const SizedBox(height: 8),
-              _buildSummaryCard(items: [
-                ('収入', _totalIncome, Colors.green),
-                ('支出', _totalExpense, Colors.red),
-                ('合計', balance, balance >= 0 ? Colors.blue : Colors.orange),
-              ]),
-              const SizedBox(height: 8),
-            ],
-          ),
-        ),
-        // グラフ / 明細 サブタブ
-        TabBar(
-          controller: _monthInnerTabController,
-          labelColor: Theme.of(context).primaryColor,
-          unselectedLabelColor: Colors.grey,
-          indicatorSize: TabBarIndicatorSize.label,
-          tabs: const [
-            Tab(text: 'グラフ'),
-            Tab(text: '明細'),
-          ],
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _monthInnerTabController,
-            children: [
-              _buildChartPage(),
-              _buildDetailPage(),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ── グラフページ（円グラフ）────────────────────────────────────
-  Widget _buildChartPage() {
     final hasData =
         _expenseByCategory.isNotEmpty || _incomeByCategory.isNotEmpty;
 
-    if (!hasData) {
-      return const Center(
-        child: Text('この月のデータがありません',
-            style: TextStyle(color: Colors.grey)),
-      );
-    }
-
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.all(16),
       children: [
+        _buildMonthSelector(),
+        const SizedBox(height: 12),
+        _buildSummaryCard(items: [
+          ('収入', _totalIncome, Colors.green),
+          ('支出', _totalExpense, Colors.red),
+          ('合計', balance, balance >= 0 ? Colors.blue : Colors.orange),
+        ]),
+        const SizedBox(height: 16),
         if (_expenseByCategory.isNotEmpty) ...[
           _buildPieSection('支出内訳', _expenseByCategory, _totalExpense,
               Colors.red.shade300),
@@ -459,268 +342,15 @@ class AnalysisScreenState extends State<AnalysisScreen>
         if (_incomeByCategory.isNotEmpty)
           _buildPieSection('収入内訳', _incomeByCategory, _totalIncome,
               Colors.green.shade300),
+        if (!hasData)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: Text('この月のデータがありません',
+                  style: TextStyle(color: Colors.grey)),
+            ),
+          ),
       ],
-    );
-  }
-
-  // ── 明細ページ（3セクション）────────────────────────────────────
-  Widget _buildDetailPage() {
-    final hasDailyInc = _dailyIncomeList.isNotEmpty;
-    final hasDailyExp = _dailyExpenseList.isNotEmpty;
-    final hasFixed =
-        _fixedIncomeList.isNotEmpty || _fixedExpenseList.isNotEmpty;
-    final hasSub = _monthSubList.isNotEmpty;
-
-    if (!hasDailyInc && !hasDailyExp && !hasFixed && !hasSub) {
-      return const Center(
-        child: Text('この月のデータがありません',
-            style: TextStyle(color: Colors.grey)),
-      );
-    }
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      children: [
-        // ── 日々の収支 ──
-        if (hasDailyInc || hasDailyExp) ...[
-          _buildDetailSection(
-            icon: Icons.calendar_today_outlined,
-            title: '日々の収支',
-            color: Colors.blue,
-            incomeList: _dailyIncomeList,
-            expenseList: _dailyExpenseList,
-          ),
-          const SizedBox(height: 12),
-        ],
-
-        // ── 月ごとの収支 ──
-        if (hasFixed) ...[
-          _buildDetailSection(
-            icon: Icons.event_repeat_outlined,
-            title: '月ごとの収支',
-            color: Colors.purple,
-            incomeList: _fixedIncomeList,
-            expenseList: _fixedExpenseList,
-          ),
-          const SizedBox(height: 12),
-        ],
-
-        // ── サブスク ──
-        if (hasSub)
-          _buildSubSection(),
-      ],
-    );
-  }
-
-  // 日々 / 月固定 共通セクションカード
-  Widget _buildDetailSection({
-    required IconData icon,
-    required String title,
-    required Color color,
-    required List<Map<String, String>> incomeList,
-    required List<Map<String, String>> expenseList,
-  }) {
-    final incTotal = incomeList.fold(
-        0, (s, e) => s + (int.tryParse(e['amount'] ?? '0') ?? 0));
-    final expTotal = expenseList.fold(
-        0, (s, e) => s + (int.tryParse(e['amount'] ?? '0') ?? 0));
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ヘッダー
-            Row(
-              children: [
-                Icon(icon, size: 16, color: color),
-                const SizedBox(width: 6),
-                Text(title,
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: color)),
-              ],
-            ),
-            const Divider(height: 16),
-
-            // 収入リスト
-            if (incomeList.isNotEmpty) ...[
-              _subHeader('収入', _formatAmount(incTotal), Colors.green),
-              const SizedBox(height: 4),
-              ...incomeList.map((e) => _buildEntryRow(e, Colors.green)),
-            ],
-
-            // 支出リスト
-            if (expenseList.isNotEmpty) ...[
-              if (incomeList.isNotEmpty) const SizedBox(height: 10),
-              _subHeader('支出', _formatAmount(expTotal), Colors.red),
-              const SizedBox(height: 4),
-              ...expenseList.map((e) => _buildEntryRow(e, Colors.red)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // サブスクセクションカード
-  Widget _buildSubSection() {
-    final incSubs =
-        _monthSubList.where((s) => s['type'] == 'income').toList();
-    final expSubs =
-        _monthSubList.where((s) => s['type'] != 'income').toList();
-    final incTotal =
-        incSubs.fold(0, (s, e) => s + (int.tryParse(e['amount'] ?? '0') ?? 0));
-    final expTotal =
-        expSubs.fold(0, (s, e) => s + (int.tryParse(e['amount'] ?? '0') ?? 0));
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.repeat_outlined, size: 16,
-                    color: Colors.orange),
-                const SizedBox(width: 6),
-                const Text('サブスク・定期払い',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.orange)),
-              ],
-            ),
-            const Divider(height: 16),
-
-            if (incSubs.isNotEmpty) ...[
-              _subHeader('収入（定期）', _formatAmount(incTotal), Colors.green),
-              const SizedBox(height: 4),
-              ...incSubs.map((s) => _buildSubRow(s, Colors.green)),
-            ],
-            if (expSubs.isNotEmpty) ...[
-              if (incSubs.isNotEmpty) const SizedBox(height: 10),
-              _subHeader('支出（定期）', _formatAmount(expTotal), Colors.red),
-              const SizedBox(height: 4),
-              ...expSubs.map((s) => _buildSubRow(s, Colors.red)),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _subHeader(String label, String total, Color color) => Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label,
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: color)),
-            Text('合計 ¥$total',
-                style: TextStyle(fontSize: 12, color: color)),
-          ],
-        ),
-      );
-
-  Widget _buildEntryRow(Map<String, String> e, Color color) {
-    final comment = e['comment'] ?? '';
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(e['date'] ?? '',
-                style: TextStyle(fontSize: 11, color: color)),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(e['title'] ?? '',
-                    style: const TextStyle(fontSize: 13)),
-                if (comment.isNotEmpty)
-                  Text(comment,
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.grey)),
-              ],
-            ),
-          ),
-          Text(
-            '¥${_formatAmount(int.tryParse(e['amount'] ?? '0') ?? 0)}',
-            style:
-                TextStyle(fontWeight: FontWeight.bold, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSubRow(Map<String, String> s, Color color) {
-    final isYearly = s['cycle'] == 'yearly';
-    final billingDay = s['billingDay'] ?? '';
-    final memo = s['comment'] ?? '';
-
-    final subLabel = isYearly
-        ? (billingDay.isNotEmpty ? '毎年$billingDay月' : '年払')
-        : (billingDay.isNotEmpty ? '毎月$billingDay日' : '定期');
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(subLabel,
-                style: TextStyle(fontSize: 11, color: color)),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s['title'] ?? '',
-                    style: const TextStyle(fontSize: 13)),
-                if (memo.isNotEmpty)
-                  Text(memo,
-                      style: const TextStyle(
-                          fontSize: 11, color: Colors.grey)),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '¥${_formatAmount(int.tryParse(s['amount'] ?? '0') ?? 0)}/月',
-                style: TextStyle(
-                    fontWeight: FontWeight.bold, fontSize: 12, color: color),
-              ),
-              if (isYearly)
-                Text(
-                  '(年払)',
-                  style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
-                ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 
@@ -1047,7 +677,7 @@ class AnalysisScreenState extends State<AnalysisScreen>
     return Card(
       color: Colors.blue.shade50,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [

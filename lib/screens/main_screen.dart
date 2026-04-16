@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'input_screen.dart';
 import 'calendar_screen.dart';
 import 'analysis_screen.dart';
+import 'detail_screen.dart';
 import 'category_settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final _calendarKey = GlobalKey<CalendarScreenState>();
   final _analysisKey = GlobalKey<AnalysisScreenState>();
+  final _detailKey = GlobalKey<DetailScreenState>();
 
   late final List<Widget> _screens;
 
@@ -31,6 +33,7 @@ class _MainScreenState extends State<MainScreen> {
       const InputScreen(),
       CalendarScreen(key: _calendarKey, onNavigateToAnalysis: _navigateToAnalysis),
       AnalysisScreen(key: _analysisKey),
+      DetailScreen(key: _detailKey),
       const CategorySettingsScreen(),
     ];
   }
@@ -46,16 +49,18 @@ class _MainScreenState extends State<MainScreen> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           // 設定タブから離れるときカレンダーの設定を再読み込み
-          if (_currentIndex == 3) {
+          if (_currentIndex == 4) {
             _calendarKey.currentState?.reloadSettings();
           }
           setState(() => _currentIndex = index);
-          // カレンダータブに切り替えたとき常に最新データを再取得
           if (index == 1) {
             _calendarKey.currentState?.reloadData();
           }
           if (index == 2) {
             _analysisKey.currentState?.reload();
+          }
+          if (index == 3) {
+            _detailKey.currentState?.reload();
           }
         },
         destinations: const [
@@ -73,6 +78,11 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.bar_chart_outlined),
             selectedIcon: Icon(Icons.bar_chart),
             label: '分析',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
+            label: '明細',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),
