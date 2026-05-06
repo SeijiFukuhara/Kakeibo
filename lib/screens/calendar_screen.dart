@@ -1091,6 +1091,77 @@ class CalendarScreenState extends State<CalendarScreen> {
     );
   }
 
+  Widget _buildDetailedSummaryTile(
+    String label,
+    int total,
+    Color color,
+    List<(String, int)> breakdown, {
+    VoidCallback? onTap,
+  }) {
+    final nonZero = breakdown.where((b) => b.$2 > 0).toList();
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(label, style: TextStyle(fontSize: 10, color: color)),
+                    const SizedBox(width: 2),
+                    Icon(Icons.pie_chart_outline, size: 10, color: color),
+                  ],
+                ),
+                Flexible(
+                  child: Text(
+                    '¥${_formatAmount(total)}',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: color),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (nonZero.isNotEmpty) ...[
+              Divider(
+                  height: 6,
+                  thickness: 0.5,
+                  color: color.withValues(alpha: 0.3)),
+              ...nonZero.map(
+                (b) => Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(b.$1,
+                        style: TextStyle(
+                            fontSize: 9,
+                            color: color.withValues(alpha: 0.75))),
+                    Text('¥${_formatAmount(b.$2)}',
+                        style: TextStyle(
+                            fontSize: 9,
+                            color: color.withValues(alpha: 0.75))),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   // ── カテゴリフィルターダイアログ（複数選択）────────────────────────
   void _showCategoryFilterDialog() {
     final allCategories = [
@@ -1693,18 +1764,20 @@ class CalendarScreenState extends State<CalendarScreen> {
                         const SizedBox(height: 12),
                         // ── 開始年月 ──
                         _InlineYMPicker(
-                          label: '開始（任意）',
+                          label: cycle == 'yearly' ? '開始年（任意）' : '開始（任意）',
                           year: startYear,
                           month: startMonth,
+                          showMonth: cycle != 'yearly',
                           onChanged: (y, m) =>
                               setDs(() { startYear = y; startMonth = m; }),
                         ),
                         const SizedBox(height: 10),
                         // ── 終了年月 ──
                         _InlineYMPicker(
-                          label: '終了（任意）',
+                          label: cycle == 'yearly' ? '終了年（任意）' : '終了（任意）',
                           year: endYear,
                           month: endMonth,
+                          showMonth: cycle != 'yearly',
                           onChanged: (y, m) =>
                               setDs(() { endYear = y; endMonth = m; }),
                         ),
@@ -2117,21 +2190,35 @@ class CalendarScreenState extends State<CalendarScreen> {
             child: Row(
               children: [
                 Expanded(
-                  child: _buildSummaryTile('収入', totalIncome, Colors.green,
-                      onTap: () => _showPieChartDialog(
-                            title: '収入の内訳',
-                            entries: incomeDisplayEvents,
-                            color: Colors.green,
-                          )),
+                  child: _buildDetailedSummaryTile(
+                    '収入', totalIncome, Colors.green,
+                    [
+                      ('日々の記録', incomeSum),
+                      ('月固定', monthIncomeSum),
+                      ('サブスク', subIncomeSum),
+                    ],
+                    onTap: () => _showPieChartDialog(
+                      title: '収入の内訳',
+                      entries: incomeDisplayEvents,
+                      color: Colors.green,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
                 Expanded(
-                  child: _buildSummaryTile('支出', totalExpense, Colors.red,
-                      onTap: () => _showPieChartDialog(
-                            title: '支出の内訳',
-                            entries: expenseDisplayEvents,
-                            color: Colors.red,
-                          )),
+                  child: _buildDetailedSummaryTile(
+                    '支出', totalExpense, Colors.red,
+                    [
+                      ('日々の記録', expenseSum),
+                      ('月固定', monthExpenseSum),
+                      ('サブスク', subExpenseSum),
+                    ],
+                    onTap: () => _showPieChartDialog(
+                      title: '支出の内訳',
+                      entries: expenseDisplayEvents,
+                      color: Colors.red,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
                 Expanded(

@@ -219,7 +219,6 @@ class _InputScreenState extends State<InputScreen> {
                         autofocus: true,
                         decoration: const InputDecoration(
                             labelText: '金額',
-                            hintText: '例：1000',
                             floatingLabelBehavior: FloatingLabelBehavior.always,
                             suffixText: '円',
                             border: OutlineInputBorder(),
@@ -243,7 +242,6 @@ class _InputScreenState extends State<InputScreen> {
                         controller: commentCtrl,
                         decoration: const InputDecoration(
                             labelText: 'メモ（任意）',
-                            hintText: 'メモを入力',
                             floatingLabelBehavior: FloatingLabelBehavior.always,
                             border: OutlineInputBorder(),
                             isDense: true),
@@ -943,7 +941,6 @@ class _InputScreenState extends State<InputScreen> {
                                     keyboardType: TextInputType.number,
                                     decoration: const InputDecoration(
                                       labelText: '金額',
-                                      hintText: '例：1000',
                                       floatingLabelBehavior: FloatingLabelBehavior.always,
                                       suffixText: '円',
                                       border: OutlineInputBorder(),
@@ -992,8 +989,7 @@ class _InputScreenState extends State<InputScreen> {
                                     controller: _commentCtrl,
                                     decoration: const InputDecoration(
                                       labelText: 'メモ（任意）',
-                                      hintText: 'メモを入力',
-                                      floatingLabelBehavior: FloatingLabelBehavior.always,
+                                                floatingLabelBehavior: FloatingLabelBehavior.always,
                                       border: OutlineInputBorder(),
                                       isDense: true,
                                     ),
