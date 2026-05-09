@@ -1600,7 +1600,7 @@ class _ModeTabBar extends StatelessWidget {
     final tabs = [
       (value: 'daily',        icon: Icons.today_outlined,           label: '日'),
       (value: 'monthly',      icon: Icons.calendar_month_outlined,  label: '月'),
-      (value: 'subscription', icon: Icons.repeat_outlined,          label: '定期'),
+      (value: 'subscription', icon: Icons.repeat_outlined,          label: 'サブスク'),
     ];
 
     return Container(

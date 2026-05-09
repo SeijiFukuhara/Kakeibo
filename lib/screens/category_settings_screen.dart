@@ -1,6 +1,7 @@
 // lib/screens/category_settings_screen.dart
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../services/account_storage.dart';
 import '../services/firestore_service.dart';
 
@@ -33,6 +34,7 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
   Future<void> _loadSettings() async {
     final data = await FirestoreService.getSettings();
     final accounts = await AccountStorage.loadAccounts();
+    if (!mounted) return;
     setState(() {
       _firstDayOfWeek = (data['first_day_of_week'] as int?) ?? 0;
       _savedAccounts = accounts;
@@ -42,6 +44,7 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
 
   Future<void> _saveFirstDay(int day) async {
     await FirestoreService.saveSettings({'first_day_of_week': day});
+    if (!mounted) return;
     setState(() => _firstDayOfWeek = day);
   }
 
@@ -187,6 +190,19 @@ class _CategorySettingsScreenState extends State<CategorySettingsScreen> {
           ),
           const Divider(height: 1),
           ListTile(
+            leading: const Icon(Icons.savings_outlined),
+            title: const Text('予算の設定'),
+            subtitle: const Text('カテゴリごとの月次予算'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const _BudgetSettingScreen()),
+              );
+            },
+          ),
+          const Divider(height: 1),
+          ListTile(
             leading: const Icon(Icons.calendar_view_week_outlined),
             title: const Text('先頭の曜日'),
             subtitle: Text(_firstDayLabel(_firstDayOfWeek)),
@@ -222,17 +238,22 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
 
   final _dailyCtrl = TextEditingController();
   final _monthlyCtrl = TextEditingController();
+  final _subscriptionCtrl = TextEditingController();
 
   List<String> _dailyExpense = [];
   List<String> _monthlyExpense = [];
+  List<String> _subscriptionExpense = [];
   List<String> _dailyIncome = [];
   List<String> _monthlyIncome = [];
+  List<String> _subscriptionIncome = [];
 
   static const _keys = [
-    'categories',
-    'monthly_expense_categories',
-    'income_categories',
-    'monthly_income_categories',
+    'categories',                       // 0: 日々の支出
+    'monthly_expense_categories',       // 1: 月ごとの支出
+    'income_categories',                // 2: 日々の収入
+    'monthly_income_categories',        // 3: 月ごとの収入
+    'subscription_expense_categories',  // 4: サブスク支出
+    'subscription_income_categories',   // 5: サブスク収入
   ];
 
   @override
@@ -247,16 +268,45 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
     _tabController.dispose();
     _dailyCtrl.dispose();
     _monthlyCtrl.dispose();
+    _subscriptionCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadAll() async {
     final data = await FirestoreService.getSettings();
+
+    var monthlyExpense =
+        List<String>.from(data[_keys[1]] ?? ['家賃', '光熱費', '通信費']);
+    var subscriptionExpense =
+        List<String>.from(data[_keys[4]] ?? []);
+
+    // 初回: monthly_expense_categories に含まれる「サブスク」項目を自動移行
+    if (!data.containsKey(_keys[4])) {
+      final toMove =
+          monthlyExpense.where((c) => c.contains('サブスク')).toList();
+      if (toMove.isNotEmpty) {
+        monthlyExpense =
+            monthlyExpense.where((c) => !c.contains('サブスク')).toList();
+        subscriptionExpense = toMove;
+        await FirestoreService.saveSettings({
+          _keys[1]: monthlyExpense,
+          _keys[4]: subscriptionExpense,
+        });
+      }
+    }
+
+    if (!mounted) return;
     setState(() {
-      _dailyExpense = List<String>.from(data[_keys[0]] ?? ['食費', '日用品', '交通費']);
-      _monthlyExpense = List<String>.from(data[_keys[1]] ?? ['家賃', '光熱費', '通信費']);
-      _dailyIncome = List<String>.from(data[_keys[2]] ?? ['給与', '副収入', 'その他']);
-      _monthlyIncome = List<String>.from(data[_keys[3]] ?? ['給与', '副収入']);
+      _dailyExpense =
+          List<String>.from(data[_keys[0]] ?? ['食費', '日用品', '交通費']);
+      _monthlyExpense = monthlyExpense;
+      _subscriptionExpense = subscriptionExpense;
+      _dailyIncome =
+          List<String>.from(data[_keys[2]] ?? ['給与', '副収入', 'その他']);
+      _monthlyIncome =
+          List<String>.from(data[_keys[3]] ?? ['給与', '副収入']);
+      _subscriptionIncome =
+          List<String>.from(data[_keys[5]] ?? []);
     });
   }
 
@@ -332,14 +382,18 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
                 _buildPage(
                   dailyList: _dailyExpense,
                   monthlyList: _monthlyExpense,
+                  subscriptionList: _subscriptionExpense,
                   dailyKey: _keys[0],
                   monthlyKey: _keys[1],
+                  subscriptionKey: _keys[4],
                 ),
                 _buildPage(
                   dailyList: _dailyIncome,
                   monthlyList: _monthlyIncome,
+                  subscriptionList: _subscriptionIncome,
                   dailyKey: _keys[2],
                   monthlyKey: _keys[3],
+                  subscriptionKey: _keys[5],
                 ),
               ],
             ),
@@ -352,8 +406,10 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
   Widget _buildPage({
     required List<String> dailyList,
     required List<String> monthlyList,
+    required List<String> subscriptionList,
     required String dailyKey,
     required String monthlyKey,
+    required String subscriptionKey,
   }) {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -370,6 +426,13 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
           list: monthlyList,
           key: monthlyKey,
           ctrl: _monthlyCtrl,
+        ),
+        const Divider(height: 32, thickness: 1),
+        _buildSection(
+          title: 'サブスクの項目',
+          list: subscriptionList,
+          key: subscriptionKey,
+          ctrl: _subscriptionCtrl,
         ),
         const SizedBox(height: 16),
       ],
@@ -459,6 +522,158 @@ class _CategoryDetailScreenState extends State<_CategoryDetailScreen>
           ),
         ),
       ],
+    );
+  }
+}
+
+// ── 予算設定画面 ──────────────────────────────────────────────────────────
+class _BudgetSettingScreen extends StatefulWidget {
+  const _BudgetSettingScreen();
+
+  @override
+  State<_BudgetSettingScreen> createState() => _BudgetSettingScreenState();
+}
+
+class _BudgetSettingScreenState extends State<_BudgetSettingScreen> {
+  List<String> _categories = [];
+  Map<String, int> _budgets = {};
+  DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final settings = await FirestoreService.getSettings();
+    final budgets = await FirestoreService.getBudgets(_month);
+    final daily =
+        List<String>.from(settings['categories'] ?? ['食費', '日用品', '交通費']);
+    final monthly = List<String>.from(
+        settings['monthly_expense_categories'] ?? ['家賃', '光熱費', '通信費']);
+    final seen = <String>{};
+    final unique =
+        [...daily, ...monthly].where((c) => seen.add(c)).toList();
+    if (!mounted) return;
+    setState(() {
+      _categories = unique;
+      _budgets = budgets;
+    });
+  }
+
+  void _editBudget(String category) {
+    final ctrl = TextEditingController(
+      text: _budgets.containsKey(category) ? _budgets[category].toString() : '',
+    );
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('$category の月次予算'),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: '金額 (円)',
+            border: OutlineInputBorder(),
+            prefixText: '¥',
+          ),
+        ),
+        actions: [
+          if (_budgets.containsKey(category))
+            TextButton(
+              onPressed: () {
+                setState(() => _budgets.remove(category));
+                FirestoreService.saveBudgets(_month, _budgets);
+                Navigator.pop(ctx);
+              },
+              child: const Text('削除', style: TextStyle(color: Colors.red)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final amount = int.tryParse(ctrl.text.replaceAll(',', ''));
+              if (amount != null && amount > 0) {
+                setState(() => _budgets[category] = amount);
+                FirestoreService.saveBudgets(_month, _budgets);
+              }
+              Navigator.pop(ctx);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = NumberFormat('#,###');
+    return Scaffold(
+      appBar: AppBar(title: const Text('予算の設定')),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left),
+                  onPressed: () {
+                    setState(() {
+                      _month = DateTime(_month.year, _month.month - 1);
+                      _budgets = {};
+                    });
+                    _load();
+                  },
+                ),
+                Text(
+                  '${_month.year}年${_month.month}月',
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right),
+                  onPressed: () {
+                    setState(() {
+                      _month = DateTime(_month.year, _month.month + 1);
+                      _budgets = {};
+                    });
+                    _load();
+                  },
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: _categories.isEmpty
+                ? const Center(child: Text('支出カテゴリがありません'))
+                : ListView.separated(
+                    itemCount: _categories.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final cat = _categories[i];
+                      final budget = _budgets[cat];
+                      return ListTile(
+                        title: Text(cat),
+                        subtitle: budget != null
+                            ? Text('¥${fmt.format(budget)} / 月')
+                            : const Text('未設定',
+                                style: TextStyle(color: Colors.grey)),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => _editBudget(cat),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

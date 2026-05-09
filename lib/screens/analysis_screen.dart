@@ -55,6 +55,7 @@ class AnalysisScreenState extends State<AnalysisScreen>
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month);
   Map<String, int> _expenseByCategory = {};
   Map<String, int> _incomeByCategory = {};
+  Map<String, int> _budgets = {};
   int _totalIncome = 0;
   int _totalExpense = 0;
 
@@ -154,10 +155,13 @@ class AnalysisScreenState extends State<AnalysisScreen>
       }
     }
 
+    final budgets = await FirestoreService.getBudgets(_month);
+
     if (!mounted) return;
     setState(() {
       _expenseByCategory = expMap;
       _incomeByCategory = incMap;
+      _budgets = budgets;
       _totalIncome = totalInc;
       _totalExpense = totalExp;
     });
@@ -339,6 +343,10 @@ class AnalysisScreenState extends State<AnalysisScreen>
               Colors.red.shade300),
           const SizedBox(height: 16),
         ],
+        if (_budgets.isNotEmpty) ...[
+          _buildBudgetSection(),
+          const SizedBox(height: 16),
+        ],
         if (_incomeByCategory.isNotEmpty)
           _buildPieSection('収入内訳', _incomeByCategory, _totalIncome,
               Colors.green.shade300),
@@ -447,6 +455,84 @@ class AnalysisScreenState extends State<AnalysisScreen>
               ),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  // ── 予算 vs 実績セクション ────────────────────────────────────
+
+  Widget _buildBudgetSection() {
+    final budgeted = _budgets.keys.toList()
+      ..sort((a, b) => (_budgets[b] ?? 0).compareTo(_budgets[a] ?? 0));
+
+    return _sectionCard(
+      title: '予算 vs 実績',
+      children: [
+        for (int i = 0; i < budgeted.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _buildBudgetRow(budgeted[i]),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildBudgetRow(String category) {
+    final budget = _budgets[category] ?? 0;
+    final actual = _expenseByCategory[category] ?? 0;
+    final ratio = budget > 0 ? (actual / budget).clamp(0.0, 1.0) : 0.0;
+    final overBudget = actual > budget;
+
+    final Color barColor;
+    if (overBudget) {
+      barColor = Colors.red;
+    } else if (ratio >= 0.8) {
+      barColor = Colors.orange;
+    } else {
+      barColor = Colors.green;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(category,
+                  style: const TextStyle(fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+            ),
+            Text(
+              '¥${_formatAmount(actual)} / ¥${_formatAmount(budget)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: overBudget ? Colors.red : Colors.black87,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: ratio,
+            backgroundColor: Colors.grey.shade200,
+            valueColor: AlwaysStoppedAnimation<Color>(barColor),
+            minHeight: 8,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            overBudget
+                ? '超過 ¥${_formatAmount(actual - budget)}'
+                : '${(ratio * 100).toStringAsFixed(0)}%',
+            style: TextStyle(
+              fontSize: 11,
+              color: overBudget ? Colors.red : Colors.grey,
+            ),
+          ),
         ),
       ],
     );

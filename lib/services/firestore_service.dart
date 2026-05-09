@@ -148,4 +148,36 @@ class FirestoreService {
 
   static Future<void> saveSettings(Map<String, dynamic> data) =>
       _write(() => _settings.set(data, SetOptions(merge: true)));
+
+  // ── 予算（月別） ─────────────────────────────────────────────────────────
+
+  static String _budgetMonthKey(DateTime month) =>
+      '${month.year}-${month.month}';
+
+  static Future<Map<String, int>> getBudgets(DateTime month) =>
+      _read(() async {
+        final monthKey = _budgetMonthKey(month);
+        final doc = await _settings.get();
+        if (!doc.exists) return {};
+        final budgets = doc.data()?['budgets'] as Map<String, dynamic>?;
+        if (budgets == null) return {};
+        final monthBudgets = budgets[monthKey] as Map<String, dynamic>?;
+        if (monthBudgets == null) return {};
+        return monthBudgets.map((k, v) => MapEntry(k, (v as num).toInt()));
+      }, {});
+
+  static Future<void> saveBudgets(
+          DateTime month, Map<String, int> budgets) =>
+      _write(() async {
+        final monthKey = _budgetMonthKey(month);
+        final doc = await _settings.get();
+        final existing = Map<String, dynamic>.from(
+            (doc.data()?['budgets'] as Map<String, dynamic>?) ?? {});
+        if (budgets.isEmpty) {
+          existing.remove(monthKey);
+        } else {
+          existing[monthKey] = budgets;
+        }
+        await _settings.set({'budgets': existing}, SetOptions(merge: true));
+      });
 }

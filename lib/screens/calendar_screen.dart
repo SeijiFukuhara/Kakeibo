@@ -35,6 +35,9 @@ class CalendarScreenState extends State<CalendarScreen> {
   // 月ごと入力用カテゴリ
   List<String> _monthlyExpenseCats = [];
   List<String> _monthlyIncomeCats = [];
+  // サブスク入力用カテゴリ
+  List<String> _subscriptionExpenseCats = [];
+  List<String> _subscriptionIncomeCats = [];
 
   // 月の開始日・先頭曜日（設定から読み込む）
   int _monthStartDay = 1;
@@ -556,6 +559,28 @@ class CalendarScreenState extends State<CalendarScreen> {
   // ── カテゴリロード ────────────────────────────────────────────────
   Future<void> _loadCategories() async {
     final data = await FirestoreService.getSettings();
+
+    var monthlyExpense = List<String>.from(
+        data['monthly_expense_categories'] ?? ['家賃', '光熱費', '通信費']);
+    var subscriptionExpense = List<String>.from(
+        data['subscription_expense_categories'] ?? []);
+
+    // 初回: monthly_expense_categoriesのサブスク項目を自動移行
+    if (!data.containsKey('subscription_expense_categories')) {
+      final toMove =
+          monthlyExpense.where((c) => c.contains('サブスク')).toList();
+      if (toMove.isNotEmpty) {
+        monthlyExpense =
+            monthlyExpense.where((c) => !c.contains('サブスク')).toList();
+        subscriptionExpense = toMove;
+        await FirestoreService.saveSettings({
+          'monthly_expense_categories': monthlyExpense,
+          'subscription_expense_categories': subscriptionExpense,
+        });
+      }
+    }
+
+    if (!mounted) return;
     setState(() {
       _monthStartDay = (data['month_start_day'] as int?) ?? 1;
       _firstDayOfWeek = (data['first_day_of_week'] as int?) ?? 0;
@@ -563,10 +588,12 @@ class CalendarScreenState extends State<CalendarScreen> {
           data['categories'] ?? ['食費', '日用品', '交通費']);
       _incomeCategories = List<String>.from(
           data['income_categories'] ?? ['給与', '副収入', 'その他']);
-      _monthlyExpenseCats = List<String>.from(
-          data['monthly_expense_categories'] ?? ['家賃', '光熱費', '通信費']);
+      _monthlyExpenseCats = monthlyExpense;
       _monthlyIncomeCats = List<String>.from(
           data['monthly_income_categories'] ?? ['給与', '副収入']);
+      _subscriptionExpenseCats = subscriptionExpense;
+      _subscriptionIncomeCats = List<String>.from(
+          data['subscription_income_categories'] ?? []);
     });
   }
 
@@ -1095,14 +1122,14 @@ class CalendarScreenState extends State<CalendarScreen> {
     String label,
     int total,
     Color color,
-    List<(String, int)> breakdown, {
+    List<(String, int, VoidCallback?)> breakdown, {
     VoidCallback? onTap,
   }) {
     final nonZero = breakdown.where((b) => b.$2 > 0).toList();
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(8),
@@ -1118,16 +1145,16 @@ class CalendarScreenState extends State<CalendarScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(label, style: TextStyle(fontSize: 10, color: color)),
+                    Text(label, style: TextStyle(fontSize: 12, color: color)),
                     const SizedBox(width: 2),
-                    Icon(Icons.pie_chart_outline, size: 10, color: color),
+                    Icon(Icons.pie_chart_outline, size: 12, color: color),
                   ],
                 ),
                 Flexible(
                   child: Text(
                     '¥${_formatAmount(total)}',
                     style: TextStyle(
-                        fontSize: 12,
+                        fontSize: 14,
                         fontWeight: FontWeight.bold,
                         color: color),
                     overflow: TextOverflow.ellipsis,
@@ -1137,28 +1164,280 @@ class CalendarScreenState extends State<CalendarScreen> {
             ),
             if (nonZero.isNotEmpty) ...[
               Divider(
-                  height: 6,
+                  height: 8,
                   thickness: 0.5,
                   color: color.withValues(alpha: 0.3)),
               ...nonZero.map(
-                (b) => Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(b.$1,
-                        style: TextStyle(
-                            fontSize: 9,
-                            color: color.withValues(alpha: 0.75))),
-                    Text('¥${_formatAmount(b.$2)}',
-                        style: TextStyle(
-                            fontSize: 9,
-                            color: color.withValues(alpha: 0.75))),
-                  ],
+                (b) => InkWell(
+                  onTap: b.$3,
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(b.$1,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: color.withValues(alpha: 0.85))),
+                            if (b.$3 != null) ...[
+                              const SizedBox(width: 2),
+                              Icon(Icons.chevron_right,
+                                  size: 14,
+                                  color: color.withValues(alpha: 0.6)),
+                            ],
+                          ],
+                        ),
+                        Text('¥${_formatAmount(b.$2)}',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: color.withValues(alpha: 0.85))),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],
           ],
         ),
       ),
+    );
+  }
+
+  void _showDailyEventsDetailDialog(
+      String title, Color color, List<Map<String, String>> events) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        child: Container(
+          width: 420,
+          constraints: const BoxConstraints(maxHeight: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(title,
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+              const Divider(height: 1),
+              if (events.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(
+                      child: Text('データがありません',
+                          style: TextStyle(color: Colors.grey))),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: events.length,
+                    itemBuilder: (_, i) {
+                      final e = events[i];
+                      final amount =
+                          int.tryParse(e['amount'] ?? '0') ?? 0;
+                      final date = e['date'] ?? '';
+                      final comment = e['comment'] ?? '';
+                      return ListTile(
+                        dense: true,
+                        title: Text(e['title'] ?? '',
+                            style: const TextStyle(fontSize: 13)),
+                        subtitle: [date, comment]
+                                .where((s) => s.isNotEmpty)
+                                .isNotEmpty
+                            ? Text(
+                                [
+                                  if (date.isNotEmpty) date,
+                                  if (comment.isNotEmpty) comment,
+                                ].join('　'),
+                                style: const TextStyle(fontSize: 11))
+                            : null,
+                        trailing: Text(
+                          '¥${_formatAmount(amount)}',
+                          style: TextStyle(
+                              color: color, fontWeight: FontWeight.bold),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              const Divider(height: 1),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child:
+                    const Text('閉じる', style: TextStyle(color: Colors.grey)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── 予算シート ─────────────────────────────────────────────────────
+  Future<void> _showBudgetSheet() async {
+    final budgets = await FirestoreService.getBudgets(_focusedDay);
+    if (!mounted) return;
+
+    if (budgets.isEmpty) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('予算'),
+          content: Text(
+              '${_focusedDay.year}年${_focusedDay.month}月の予算は設定されていません'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('閉じる'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // カテゴリ別実績を集計
+    final expenseByCategory = <String, int>{};
+    for (final e in _monthlyEvents) {
+      if (e['type'] != 'income') {
+        final cat = e['title'] ?? '';
+        expenseByCategory[cat] =
+            (expenseByCategory[cat] ?? 0) + (int.tryParse(e['amount'] ?? '0') ?? 0);
+      }
+    }
+    for (final e in _monthExpenseEntries) {
+      final cat = e['title'] ?? '';
+      expenseByCategory[cat] =
+          (expenseByCategory[cat] ?? 0) + (int.tryParse(e['amount'] ?? '0') ?? 0);
+    }
+    for (final s in _subscriptions) {
+      if (s['type'] == 'expense' && _isSubApplicable(s, _focusedDay)) {
+        final cat = s['category']?.isNotEmpty == true
+            ? s['category']!
+            : (s['title'] ?? '');
+        final raw = int.tryParse(s['amount'] ?? '0') ?? 0;
+        final amount = s['cycle'] == 'yearly' ? (raw / 12).round() : raw;
+        expenseByCategory[cat] = (expenseByCategory[cat] ?? 0) + amount;
+      }
+    }
+
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        final fmt = NumberFormat('#,###');
+        final sorted = budgets.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.55,
+          maxChildSize: 0.9,
+          builder: (_, scrollCtrl) => Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${_focusedDay.year}年${_focusedDay.month}月 予算',
+                    style: const TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  controller: scrollCtrl,
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    for (final entry in sorted) ...[
+                      _buildBudgetProgressRow(
+                        entry.key,
+                        entry.value,
+                        expenseByCategory[entry.key] ?? 0,
+                        fmt,
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildBudgetProgressRow(
+      String category, int budget, int actual, NumberFormat fmt) {
+    final ratio = budget > 0 ? (actual / budget).clamp(0.0, 1.0) : 0.0;
+    final overBudget = actual > budget;
+    final Color barColor = overBudget
+        ? Colors.red
+        : ratio >= 0.8
+            ? Colors.orange
+            : Colors.green;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(category,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500)),
+            ),
+            Text(
+              '¥${fmt.format(actual)} / ¥${fmt.format(budget)}',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: overBudget ? Colors.red : Colors.black87),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: ratio,
+            backgroundColor: Colors.grey.shade200,
+            valueColor: AlwaysStoppedAnimation<Color>(barColor),
+            minHeight: 8,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            overBudget
+                ? '超過 ¥${fmt.format(actual - budget)}'
+                : '${(ratio * 100).toStringAsFixed(0)}%',
+            style: TextStyle(
+                fontSize: 11, color: overBudget ? Colors.red : Colors.grey),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1442,131 +1721,160 @@ class CalendarScreenState extends State<CalendarScreen> {
                     )
                   else
                     Flexible(
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _subscriptions.length,
-                        itemBuilder: (_, i) {
-                          final s = _subscriptions[i];
-                          final isIncome = s['type'] == 'income';
-                          final isYearly = s['cycle'] == 'yearly';
-                          final color = isIncome ? Colors.green : Colors.red;
-                          final day = s['billingDay'] ?? '';
-                          final memo = s['memo'] ?? '';
-                          final amount = int.tryParse(s['amount'] ?? '0') ?? 0;
-                          final monthlyAmount = isYearly ? (amount / 12).round() : amount;
-                          return ListTile(
-                            dense: true,
-                            onTap: () async {
-                              await _showSubscriptionFormDialog(
-                                  editIndex: i, existing: s);
-                              setDs(() {});
-                            },
-                            leading: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: color.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(isIncome ? '収入' : '支出',
-                                      style: TextStyle(color: color, fontSize: 10)),
+                      child: Builder(
+                        builder: (_) {
+                          final monthly = _subscriptions
+                              .asMap()
+                              .entries
+                              .where((e) => e.value['cycle'] != 'yearly')
+                              .toList();
+                          final yearly = _subscriptions
+                              .asMap()
+                              .entries
+                              .where((e) => e.value['cycle'] == 'yearly')
+                              .toList();
+
+                          Widget buildItem(
+                              int origIdx, Map<String, String> s) {
+                            final isIncome = s['type'] == 'income';
+                            final isYearly = s['cycle'] == 'yearly';
+                            final color =
+                                isIncome ? Colors.green : Colors.red;
+                            final day = s['billingDay'] ?? '';
+                            final category = s['category'] ?? '';
+                            final amount =
+                                int.tryParse(s['amount'] ?? '0') ?? 0;
+                            final monthlyAmount =
+                                isYearly ? (amount / 12).round() : amount;
+                            final subtitleParts = [
+                              if (category.isNotEmpty) category,
+                              if (day.isNotEmpty)
+                                isYearly ? '毎年$day月' : '毎月$day日',
+                            ];
+                            return ListTile(
+                              dense: true,
+                              onTap: () async {
+                                await _showSubscriptionFormDialog(
+                                    editIndex: origIdx, existing: s);
+                                setDs(() {});
+                              },
+                              leading: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: color.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
                                 ),
-                                const SizedBox(height: 2),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: isYearly
-                                        ? Colors.orange.withValues(alpha: 0.15)
-                                        : Colors.blue.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Text(
-                                    isYearly ? '年払' : '毎月',
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        color: isYearly
-                                            ? Colors.orange.shade700
-                                            : Colors.blue),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            title: Text(s['title'] ?? ''),
-                            subtitle: Text(
-                              [
-                                if (day.isNotEmpty)
-                                  isYearly ? '毎年$day月' : '毎月$day日',
-                                if (memo.isNotEmpty) memo,
-                              ].join('　'),
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      '¥${_formatAmount(monthlyAmount)}/月',
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                          fontSize: 12,
-                                          color: color),
-                                    ),
-                                    if (isYearly)
+                                child: Text(isIncome ? '収入' : '支出',
+                                    style:
+                                        TextStyle(color: color, fontSize: 10)),
+                              ),
+                              title: Text(s['title'] ?? '',
+                                  style: const TextStyle(fontSize: 13)),
+                              subtitle: subtitleParts.isNotEmpty
+                                  ? Text(subtitleParts.join('　'),
+                                      style: const TextStyle(fontSize: 11))
+                                  : null,
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
                                       Text(
-                                        '年額 ¥${_formatAmount(amount)}',
+                                        '¥${_formatAmount(monthlyAmount)}/月',
                                         style: TextStyle(
-                                            fontSize: 10,
-                                            color: Colors.grey.shade600),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 12,
+                                            color: color),
                                       ),
-                                  ],
+                                      if (isYearly)
+                                        Text(
+                                          '年額 ¥${_formatAmount(amount)}',
+                                          style: TextStyle(
+                                              fontSize: 10,
+                                              color: Colors.grey.shade600),
+                                        ),
+                                    ],
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.delete_outline,
+                                        size: 18),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(
+                                        minWidth: 32, minHeight: 32),
+                                    onPressed: () async {
+                                      final ok = await showDialog<bool>(
+                                        context: context,
+                                        builder: (c) => AlertDialog(
+                                          title: const Text('確認'),
+                                          content: const Text(
+                                              'この定期払いを削除しますか？'),
+                                          actions: [
+                                            TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, false),
+                                                child:
+                                                    const Text('キャンセル')),
+                                            TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, true),
+                                                child: const Text('削除',
+                                                    style: TextStyle(
+                                                        color: Colors.red))),
+                                          ],
+                                        ),
+                                      );
+                                      if (ok == true) {
+                                        final subs =
+                                            List<Map<String, String>>.from(
+                                                _subscriptions);
+                                        subs.removeAt(origIdx);
+                                        await FirestoreService
+                                            .setSubscriptions(subs);
+                                        await _loadSubscriptions();
+                                        setDs(() {});
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+
+                          return ListView(
+                            shrinkWrap: true,
+                            children: [
+                              if (monthly.isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      16, 8, 16, 2),
+                                  child: Text('月単位',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade600,
+                                          fontWeight: FontWeight.bold)),
                                 ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline,
-                                      size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(
-                                      minWidth: 32, minHeight: 32),
-                                  onPressed: () async {
-                                    final ok = await showDialog<bool>(
-                                      context: context,
-                                      builder: (c) => AlertDialog(
-                                        title: const Text('確認'),
-                                        content:
-                                            const Text('この定期払いを削除しますか？'),
-                                        actions: [
-                                          TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(c, false),
-                                              child: const Text('キャンセル')),
-                                          TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(c, true),
-                                              child: const Text('削除',
-                                                  style: TextStyle(
-                                                      color: Colors.red))),
-                                        ],
-                                      ),
-                                    );
-                                    if (ok == true) {
-                                      final subs = List<Map<String, String>>.from(
-                                          _subscriptions);
-                                      subs.removeAt(i);
-                                      await FirestoreService.setSubscriptions(
-                                          subs);
-                                      await _loadSubscriptions();
-                                      setDs(() {});
-                                    }
-                                  },
-                                ),
+                                const Divider(height: 1),
+                                ...monthly
+                                    .map((e) => buildItem(e.key, e.value)),
                               ],
-                            ),
+                              if (yearly.isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.fromLTRB(
+                                      16, 8, 16, 2),
+                                  child: Text('年単位',
+                                      style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey.shade600,
+                                          fontWeight: FontWeight.bold)),
+                                ),
+                                const Divider(height: 1),
+                                ...yearly
+                                    .map((e) => buildItem(e.key, e.value)),
+                              ],
+                            ],
                           );
                         },
                       ),
@@ -1595,16 +1903,16 @@ class CalendarScreenState extends State<CalendarScreen> {
     String subType = isEdit ? (existing['type'] ?? 'expense') : 'expense';
     String cycle = isEdit ? (existing['cycle'] ?? 'monthly') : 'monthly';
     List<String> cats() =>
-        subType == 'income' ? _monthlyIncomeCats : _monthlyExpenseCats;
+        subType == 'income' ? _subscriptionIncomeCats : _subscriptionExpenseCats;
     String? selectedCat = isEdit
-        ? (cats().contains(existing['title'])
-            ? existing['title']
+        ? (cats().contains(existing['category'])
+            ? existing['category']
             : (cats().isNotEmpty ? cats()[0] : null))
         : (cats().isNotEmpty ? cats()[0] : null);
+    final titleCtrl =
+        TextEditingController(text: isEdit ? (existing['title'] ?? '') : '');
     final amountCtrl =
         TextEditingController(text: isEdit ? (existing['amount'] ?? '') : '');
-    final memoCtrl =
-        TextEditingController(text: isEdit ? (existing['memo'] ?? '') : '');
     int? billingDay =
         isEdit ? int.tryParse(existing['billingDay'] ?? '') : null;
 
@@ -1682,9 +1990,20 @@ class CalendarScreenState extends State<CalendarScreen> {
                         ),
                         const SizedBox(height: 10),
                         TextField(
+                          controller: titleCtrl,
+                          autofocus: !isEdit,
+                          decoration: const InputDecoration(
+                              labelText: 'サービス名',
+                              hintText: '例：Netflix',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              border: OutlineInputBorder(),
+                              isDense: true),
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
                           controller: amountCtrl,
                           keyboardType: TextInputType.number,
-                          autofocus: !isEdit,
                           decoration: InputDecoration(
                               labelText: '金額',
                               hintText: '例：1000',
@@ -1707,17 +2026,59 @@ class CalendarScreenState extends State<CalendarScreen> {
                             }),
                           ),
                         const SizedBox(height: 10),
-                        DropdownButtonFormField<String>(
-                          initialValue: selectedCat,
-                          decoration: const InputDecoration(
-                              labelText: 'カテゴリ',
-                              border: OutlineInputBorder(),
-                              isDense: true),
-                          items: cats()
-                              .map((c) =>
-                                  DropdownMenuItem(value: c, child: Text(c)))
-                              .toList(),
-                          onChanged: (v) => setDs(() => selectedCat = v),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                key: ValueKey(
+                                    '${subType}_${selectedCat ?? ""}_${cats().length}'),
+                                initialValue: selectedCat,
+                                decoration: const InputDecoration(
+                                    labelText: 'カテゴリ',
+                                    border: OutlineInputBorder(),
+                                    isDense: true),
+                                items: cats()
+                                    .map((c) => DropdownMenuItem(
+                                        value: c, child: Text(c)))
+                                    .toList(),
+                                onChanged: (v) =>
+                                    setDs(() => selectedCat = v),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              height: 44,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                    minimumSize: const Size(44, 44),
+                                    padding: EdgeInsets.zero),
+                                onPressed: () async {
+                                  final newCat =
+                                      await _showAddSubCategoryDialog();
+                                  if (newCat == null ||
+                                      newCat.isEmpty ||
+                                      !mounted) { return; }
+                                  final settingKey = subType == 'income'
+                                      ? 'subscription_income_categories'
+                                      : 'subscription_expense_categories';
+                                  final currentList = List<String>.from(
+                                      subType == 'income'
+                                          ? _subscriptionIncomeCats
+                                          : _subscriptionExpenseCats);
+                                  if (!currentList.contains(newCat)) {
+                                    currentList.add(newCat);
+                                    await FirestoreService.saveSettings(
+                                        {settingKey: currentList});
+                                    await _loadCategories();
+                                  }
+                                  if (!mounted) return;
+                                  setDs(() => selectedCat = newCat);
+                                },
+                                child: const Icon(Icons.add, size: 20),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<int?>(
@@ -1749,17 +2110,6 @@ class CalendarScreenState extends State<CalendarScreen> {
                                           child: Text('毎月${i + 1}日'))),
                                 ],
                           onChanged: (v) => setDs(() => billingDay = v),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: memoCtrl,
-                          decoration: const InputDecoration(
-                              labelText: 'メモ（任意）',
-                              hintText: 'メモを入力',
-                              floatingLabelBehavior:
-                                  FloatingLabelBehavior.always,
-                              border: OutlineInputBorder(),
-                              isDense: true),
                         ),
                         const SizedBox(height: 12),
                         // ── 開始年月 ──
@@ -1830,7 +2180,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                       ElevatedButton(
                         onPressed: () async {
                           if (amountCtrl.text.isEmpty ||
-                              selectedCat == null) { return; }
+                              titleCtrl.text.trim().isEmpty) { return; }
                           final now = DateTime.now();
                           final effectiveStart =
                               buildYM(startYear, startMonth).isNotEmpty
@@ -1839,12 +2189,12 @@ class CalendarScreenState extends State<CalendarScreen> {
                           final newSub = {
                             'type': subType,
                             'cycle': cycle,
-                            'title': selectedCat!,
+                            'title': titleCtrl.text.trim(),
+                            'category': selectedCat ?? '',
                             'amount': amountCtrl.text,
                             'billingDay': billingDay?.toString() ?? '',
                             'startYearMonth': effectiveStart,
                             'endYearMonth': buildYM(endYear, endMonth),
-                            'memo': memoCtrl.text,
                           };
                           final subs = List<Map<String, String>>.from(
                               _subscriptions);
@@ -1868,8 +2218,41 @@ class CalendarScreenState extends State<CalendarScreen> {
         ),
       ),
     );
+    titleCtrl.dispose();
     amountCtrl.dispose();
-    memoCtrl.dispose();
+  }
+
+  // ── カテゴリ追加ダイアログ（サブスク用）────────────────────────────
+  Future<String?> _showAddSubCategoryDialog() async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('カテゴリを追加'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'カテゴリ名',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          onSubmitted: (v) => Navigator.pop(c, v.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('キャンセル'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+            child: const Text('追加'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return result;
   }
 
   // ── Build ────────────────────────────────────────────────────────
@@ -2120,39 +2503,18 @@ class CalendarScreenState extends State<CalendarScreen> {
           ),
           ),
 
-          // ボタン行: 月の収支登録 ／ 定期払い管理
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+
+          // フィルター・予算ボタン
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
             child: Row(
               children: [
                 Expanded(
-                  flex: 3,
-                  child: ElevatedButton.icon(
-                    onPressed: _showMonthListDialog,
-                    icon: const Icon(Icons.add, size: 16),
-                    label: Text('${_focusedDay.month}月の収支を登録',
-                        overflow: TextOverflow.ellipsis),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
-                  child: OutlinedButton.icon(
-                    onPressed: _showSubscriptionListDialog,
-                    icon: const Icon(Icons.repeat_outlined, size: 16),
-                    label: const Text('定期払い',
-                        overflow: TextOverflow.ellipsis),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  flex: 2,
                   child: OutlinedButton.icon(
                     onPressed: _showCategoryFilterDialog,
                     icon: Icon(Icons.filter_list,
@@ -2163,7 +2525,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                     label: Text(
                       _filterCategories.isEmpty
                           ? 'フィルター'
-                          : '${_filterCategories.length}件選択',
+                          : 'フィルター中: ${_filterCategories.length}件選択',
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: _filterCategories.isNotEmpty
@@ -2172,7 +2534,7 @@ class CalendarScreenState extends State<CalendarScreen> {
                       ),
                     ),
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 9),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       backgroundColor: _filterCategories.isNotEmpty
                           ? Colors.indigo
                           : Colors.indigo.withValues(alpha: 0.06),
@@ -2180,65 +2542,175 @@ class CalendarScreenState extends State<CalendarScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _showBudgetSheet,
+                    icon: const Icon(Icons.savings_outlined,
+                        size: 16, color: Colors.teal),
+                    label: const Text('予算',
+                        style: TextStyle(color: Colors.teal)),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      backgroundColor: Colors.teal.withValues(alpha: 0.06),
+                      side: const BorderSide(color: Colors.teal),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
 
+          // 月の出費（登録済み項目）
+          if (_monthExpenseEntries.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+              child: Card(
+                margin: EdgeInsets.zero,
+                child: InkWell(
+                  onTap: _showMonthListDialog,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text('月',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orange)),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text('月の出費',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.black54)),
+                            const Spacer(),
+                            Text(
+                              '合計 ¥${_formatAmount(_monthExpenseEntries.fold(0, (s, e) => s + (int.tryParse(e['amount'] ?? '0') ?? 0)))}',
+                              style: const TextStyle(
+                                  fontSize: 12, color: Colors.red),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.chevron_right,
+                                size: 16, color: Colors.grey),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        const Divider(height: 1),
+                        ...(_monthExpenseEntries.map((e) {
+                          final amount =
+                              int.tryParse(e['amount'] ?? '0') ?? 0;
+                          final day = e['day'] ?? '';
+                          return Padding(
+                            padding: const EdgeInsets.only(top: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(e['title'] ?? '',
+                                      style: const TextStyle(fontSize: 13)),
+                                ),
+                                if (day.isNotEmpty)
+                                  Text('$day日　',
+                                      style: const TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey)),
+                                Text(
+                                  '¥${_formatAmount(amount)}',
+                                  style: const TextStyle(
+                                      fontSize: 13,
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.w500),
+                                ),
+                              ],
+                            ),
+                          );
+                        })),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
           // 月合計バー
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: _buildDetailedSummaryTile(
-                    '収入', totalIncome, Colors.green,
-                    [
-                      ('日々の記録', incomeSum),
-                      ('月固定', monthIncomeSum),
-                      ('サブスク', subIncomeSum),
-                    ],
-                    onTap: () => _showPieChartDialog(
-                      title: '収入の内訳',
-                      entries: incomeDisplayEvents,
-                      color: Colors.green,
-                    ),
+                _buildDetailedSummaryTile(
+                  '収入', totalIncome, Colors.green,
+                  [
+                    ('日々の記録', incomeSum, incomeSum > 0
+                        ? () => _showDailyEventsDetailDialog(
+                            '収入 日々の記録', Colors.green, incomeEvents)
+                        : null),
+                    ('月固定', monthIncomeSum, monthIncomeSum > 0
+                        ? _showMonthListDialog
+                        : null),
+                    ('サブスク', subIncomeSum, subIncomeSum > 0
+                        ? _showSubscriptionListDialog
+                        : null),
+                  ],
+                  onTap: () => _showPieChartDialog(
+                    title: '収入の内訳',
+                    entries: incomeDisplayEvents,
+                    color: Colors.green,
                   ),
                 ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: _buildDetailedSummaryTile(
-                    '支出', totalExpense, Colors.red,
-                    [
-                      ('日々の記録', expenseSum),
-                      ('月固定', monthExpenseSum),
-                      ('サブスク', subExpenseSum),
-                    ],
-                    onTap: () => _showPieChartDialog(
-                      title: '支出の内訳',
-                      entries: expenseDisplayEvents,
-                      color: Colors.red,
-                    ),
+                const SizedBox(height: 6),
+                _buildDetailedSummaryTile(
+                  '支出', totalExpense, Colors.red,
+                  [
+                    ('日々の記録', expenseSum, expenseSum > 0
+                        ? () => _showDailyEventsDetailDialog(
+                            '支出 日々の記録', Colors.red, expenseEvents)
+                        : null),
+                    ('月固定', monthExpenseSum, monthExpenseSum > 0
+                        ? _showMonthListDialog
+                        : null),
+                    ('サブスク', subExpenseSum, subExpenseSum > 0
+                        ? _showSubscriptionListDialog
+                        : null),
+                  ],
+                  onTap: () => _showPieChartDialog(
+                    title: '支出の内訳',
+                    entries: expenseDisplayEvents,
+                    color: Colors.red,
                   ),
                 ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: _buildSummaryTile(
-                    '合計',
-                    balance,
-                    balance >= 0 ? Colors.blue : Colors.orange,
-                    onTap: () => _showPieChartDialog(
-                          title: '収支の内訳',
-                          entries: [
-                            ...incomeDisplayEvents
-                                .map((e) => {...e, 'title': '収入:${e['title']}'}),
-                            ...expenseDisplayEvents
-                                .map((e) => {...e, 'title': '支出:${e['title']}'}),
-                          ],
-                          color: balance >= 0 ? Colors.blue : Colors.orange,
-                        ),
+                const SizedBox(height: 6),
+                _buildSummaryTile(
+                  '合計',
+                  balance,
+                  balance >= 0 ? Colors.blue : Colors.orange,
+                  onTap: () => _showPieChartDialog(
+                    title: '収支の内訳',
+                    entries: [
+                      ...incomeDisplayEvents
+                          .map((e) => {...e, 'title': '収入:${e['title']}'}),
+                      ...expenseDisplayEvents
+                          .map((e) => {...e, 'title': '支出:${e['title']}'}),
+                    ],
+                    color: balance >= 0 ? Colors.blue : Colors.orange,
                   ),
                 ),
               ],
+            ),
+          ),
+
+                ],
+              ),
             ),
           ),
 
