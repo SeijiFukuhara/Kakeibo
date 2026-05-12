@@ -442,24 +442,15 @@ class _InputScreenState extends State<InputScreen> {
   }) async {
     final isEdit = existing != null;
     String subType = isEdit ? (existing['type'] ?? 'expense') : 'expense';
-    List<String> cats() =>
-        subType == 'income' ? _monthlyIncomeCats : _monthlyExpenseCats;
-    String? selectedCat = isEdit
-        ? (cats().contains(existing['title'])
-            ? existing['title']
-            : (cats().isNotEmpty ? cats()[0] : null))
-        : (cats().isNotEmpty ? cats()[0] : null);
     String cycle = isEdit ? (existing['cycle'] ?? 'monthly') : 'monthly';
+    final categoryCtrl =
+        TextEditingController(text: isEdit ? (existing['title'] ?? '') : '');
     final amountCtrl =
         TextEditingController(text: isEdit ? (existing['amount'] ?? '') : '');
     final memoCtrl =
         TextEditingController(text: isEdit ? (existing['memo'] ?? '') : '');
     int? billingDay =
         isEdit ? int.tryParse(existing['billingDay'] ?? '') : null;
-
-    // 開始・終了月
-    String startYM = isEdit ? (existing['startYearMonth'] ?? '') : '';
-    String endYM = isEdit ? (existing['endYearMonth'] ?? '') : '';
 
     await showDialog(
       context: context,
@@ -494,11 +485,8 @@ class _InputScreenState extends State<InputScreen> {
                                 value: 'expense', label: Text('支出')),
                           ],
                           selected: {subType},
-                          onSelectionChanged: (s) => setDs(() {
-                            subType = s.first;
-                            selectedCat =
-                                cats().isNotEmpty ? cats()[0] : null;
-                          }),
+                          onSelectionChanged: (s) =>
+                              setDs(() => subType = s.first),
                         ),
                         const SizedBox(height: 10),
                         SegmentedButton<String>(
@@ -516,8 +504,6 @@ class _InputScreenState extends State<InputScreen> {
                           onSelectionChanged: (s) => setDs(() {
                             cycle = s.first;
                             billingDay = null;
-                            startYM = '';
-                            endYM = '';
                           }),
                         ),
                         const SizedBox(height: 10),
@@ -544,17 +530,15 @@ class _InputScreenState extends State<InputScreen> {
                             }),
                           ),
                         const SizedBox(height: 10),
-                        DropdownButtonFormField<String>(
-                          initialValue: selectedCat,
+                        TextField(
+                          controller: categoryCtrl,
                           decoration: const InputDecoration(
-                              labelText: 'カテゴリ',
+                              labelText: 'カテゴリ（任意）',
+                              hintText: '例：動画配信',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
                               border: OutlineInputBorder(),
                               isDense: true),
-                          items: cats()
-                              .map((c) =>
-                                  DropdownMenuItem(value: c, child: Text(c)))
-                              .toList(),
-                          onChanged: (v) => setDs(() => selectedCat = v),
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<int?>(
@@ -597,33 +581,6 @@ class _InputScreenState extends State<InputScreen> {
                               border: OutlineInputBorder(),
                               isDense: true),
                         ),
-                        const SizedBox(height: 12),
-                        // 開始・終了（月単位：年月 / 年単位：年のみ）
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _YearMonthPicker(
-                                label: cycle == 'yearly'
-                                    ? '開始年（任意）'
-                                    : '開始月（任意）',
-                                value: startYM,
-                                showMonth: cycle != 'yearly',
-                                onChanged: (v) => setDs(() => startYM = v),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _YearMonthPicker(
-                                label: cycle == 'yearly'
-                                    ? '終了年（任意）'
-                                    : '終了月（任意）',
-                                value: endYM,
-                                showMonth: cycle != 'yearly',
-                                onChanged: (v) => setDs(() => endYM = v),
-                              ),
-                            ),
-                          ],
-                        ),
                       ],
                     ),
                   ),
@@ -640,23 +597,15 @@ class _InputScreenState extends State<InputScreen> {
                       ),
                       ElevatedButton(
                         onPressed: () async {
-                          if (amountCtrl.text.isEmpty || selectedCat == null) {
-                            return;
-                          }
-                          final now = DateTime.now();
-                          final effectiveStart = startYM.isNotEmpty
-                              ? startYM
-                              : (cycle == 'yearly'
-                                  ? '${now.year}'
-                                  : '${now.year}-${now.month}');
+                          if (amountCtrl.text.isEmpty) return;
                           final newSub = {
                             'type': subType,
                             'cycle': cycle,
-                            'title': selectedCat!,
+                            'title': categoryCtrl.text.trim(),
                             'amount': amountCtrl.text,
                             'billingDay': billingDay?.toString() ?? '',
-                            'startYearMonth': effectiveStart,
-                            'endYearMonth': endYM,
+                            'startYearMonth': '',
+                            'endYearMonth': '',
                             'memo': memoCtrl.text,
                           };
                           final subs = List<Map<String, String>>.from(
@@ -681,6 +630,7 @@ class _InputScreenState extends State<InputScreen> {
         ),
       ),
     );
+    categoryCtrl.dispose();
     amountCtrl.dispose();
     memoCtrl.dispose();
   }
@@ -1428,158 +1378,6 @@ class _InputScreenState extends State<InputScreen> {
                     );
                   },
                 ),
-        ),
-      ],
-    );
-  }
-}
-
-// ── 年月ピッカー小ウィジェット ───────────────────────────────────────────
-class _YearMonthPicker extends StatefulWidget {
-  final String label;
-  final String value; // 'YYYY-M' or 'YYYY' (year-only) or ''
-  final void Function(String) onChanged;
-  final bool showMonth; // false のとき年のみ表示（年単位サブスク用）
-
-  const _YearMonthPicker({
-    required this.label,
-    required this.value,
-    required this.onChanged,
-    this.showMonth = true,
-  });
-
-  @override
-  State<_YearMonthPicker> createState() => _YearMonthPickerState();
-}
-
-class _YearMonthPickerState extends State<_YearMonthPicker> {
-  int? _year;
-  int? _month;
-
-  @override
-  void initState() {
-    super.initState();
-    _parse(widget.value);
-  }
-
-  @override
-  void didUpdateWidget(_YearMonthPicker old) {
-    super.didUpdateWidget(old);
-    if (old.value != widget.value) _parse(widget.value);
-  }
-
-  void _parse(String v) {
-    if (v.isEmpty) {
-      _year = null;
-      _month = null;
-    } else {
-      final parts = v.split('-');
-      _year = int.tryParse(parts[0]);
-      _month = parts.length > 1 ? int.tryParse(parts[1]) : null;
-    }
-  }
-
-  void _notify() {
-    if (!widget.showMonth) {
-      // 年のみモード
-      widget.onChanged(_year != null ? '$_year' : '');
-    } else {
-      if (_year != null && _month != null) {
-        widget.onChanged('$_year-$_month');
-      } else {
-        widget.onChanged('');
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final isSet = _year != null || _month != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Text(widget.label,
-                style: const TextStyle(fontSize: 11, color: Colors.grey)),
-            if (isSet) ...[
-              const Spacer(),
-              GestureDetector(
-                onTap: () {
-                  setState(() { _year = null; _month = null; });
-                  widget.onChanged('');
-                },
-                child: const Text('クリア',
-                    style: TextStyle(fontSize: 11, color: Colors.blue)),
-              ),
-            ],
-          ],
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Expanded(
-              child: InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: '年',
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int?>(
-                    value: _year,
-                    isDense: true,
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('---')),
-                      ...List.generate(11, (i) {
-                        final y = now.year - 1 + i;
-                        return DropdownMenuItem(value: y, child: Text('$y年'));
-                      }),
-                    ],
-                    onChanged: (v) {
-                      setState(() => _year = v);
-                      _notify();
-                    },
-                  ),
-                ),
-              ),
-            ),
-            if (widget.showMonth) ...[
-              const SizedBox(width: 6),
-              Expanded(
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    labelText: '月',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<int?>(
-                      value: _month,
-                      isDense: true,
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('---')),
-                        ...List.generate(
-                            12,
-                            (i) => DropdownMenuItem(
-                                value: i + 1, child: Text('${i + 1}月'))),
-                      ],
-                      onChanged: (v) {
-                        setState(() => _month = v);
-                        _notify();
-                      },
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
         ),
       ],
     );

@@ -3,6 +3,7 @@ import 'input_screen.dart';
 import 'calendar_screen.dart';
 import 'analysis_screen.dart';
 import 'detail_screen.dart';
+import 'balance_screen.dart';
 import 'category_settings_screen.dart';
 
 class MainScreen extends StatefulWidget {
@@ -18,6 +19,7 @@ class _MainScreenState extends State<MainScreen> {
   final _calendarKey = GlobalKey<CalendarScreenState>();
   final _analysisKey = GlobalKey<AnalysisScreenState>();
   final _detailKey = GlobalKey<DetailScreenState>();
+  final _balanceKey = GlobalKey<BalanceScreenState>();
 
   late final List<Widget> _screens;
 
@@ -34,6 +36,7 @@ class _MainScreenState extends State<MainScreen> {
       CalendarScreen(key: _calendarKey, onNavigateToAnalysis: _navigateToAnalysis),
       AnalysisScreen(key: _analysisKey),
       DetailScreen(key: _detailKey),
+      BalanceScreen(key: _balanceKey),
       const CategorySettingsScreen(),
     ];
   }
@@ -49,7 +52,7 @@ class _MainScreenState extends State<MainScreen> {
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           // 設定タブから離れるときカレンダーの設定を再読み込み
-          if (_currentIndex == 4) {
+          if (_currentIndex == 5) {
             _calendarKey.currentState?.reloadSettings();
           }
           setState(() => _currentIndex = index);
@@ -61,6 +64,9 @@ class _MainScreenState extends State<MainScreen> {
           }
           if (index == 3) {
             _detailKey.currentState?.reload();
+          }
+          if (index == 4) {
+            _balanceKey.currentState?.reload();
           }
         },
         destinations: const [
@@ -83,6 +89,11 @@ class _MainScreenState extends State<MainScreen> {
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),
             label: '明細',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            selectedIcon: Icon(Icons.account_balance_wallet),
+            label: '収支',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

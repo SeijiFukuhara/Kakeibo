@@ -18,6 +18,10 @@ class DetailScreenState extends State<DetailScreen> {
   Map<String, List<Map<String, String>>> _incomeByCategory = {};
   Map<String, int> _budgets = {};
 
+  // 設定の並び順
+  List<String> _expenseCategoryOrder = [];
+  List<String> _incomeCategoryOrder = [];
+
   bool _loading = true;
 
   void reload() => _loadData();
@@ -76,6 +80,14 @@ class DetailScreenState extends State<DetailScreen> {
 
     final settings = await FirestoreService.getSettings();
     _monthStartDay = (settings['month_start_day'] as int?) ?? 1;
+    _expenseCategoryOrder = [
+      ...List<String>.from(settings['categories'] ?? []),
+      ...List<String>.from(settings['monthly_expense_categories'] ?? []),
+    ];
+    _incomeCategoryOrder = [
+      ...List<String>.from(settings['income_categories'] ?? []),
+      ...List<String>.from(settings['monthly_income_categories'] ?? []),
+    ];
 
     final expByCat = <String, List<Map<String, String>>>{};
     final incByCat = <String, List<Map<String, String>>>{};
@@ -113,6 +125,13 @@ class DetailScreenState extends State<DetailScreen> {
           add(expByCat, cat, row);
         }
       }
+    }
+
+    // 支出カテゴリ設定にある項目を0円として補完（未使用カテゴリも表示）
+    final dailyExpCats =
+        List<String>.from(settings['categories'] ?? []);
+    for (final cat in dailyExpCats) {
+      expByCat.putIfAbsent(cat, () => []);
     }
 
     // 月固定（収入のみ）
@@ -177,10 +196,16 @@ class DetailScreenState extends State<DetailScreen> {
     final hasAny =
         _expenseByCategory.isNotEmpty || _incomeByCategory.isNotEmpty;
 
+    int orderIdx(String key, List<String> order) {
+      final i = order.indexOf(key);
+      return i == -1 ? order.length : i;
+    }
     final sortedExp = _expenseByCategory.entries.toList()
-      ..sort((a, b) => _catTotal(b.value).compareTo(_catTotal(a.value)));
+      ..sort((a, b) => orderIdx(a.key, _expenseCategoryOrder)
+          .compareTo(orderIdx(b.key, _expenseCategoryOrder)));
     final sortedInc = _incomeByCategory.entries.toList()
-      ..sort((a, b) => _catTotal(b.value).compareTo(_catTotal(a.value)));
+      ..sort((a, b) => orderIdx(a.key, _incomeCategoryOrder)
+          .compareTo(orderIdx(b.key, _incomeCategoryOrder)));
 
     return Scaffold(
       body: SafeArea(
